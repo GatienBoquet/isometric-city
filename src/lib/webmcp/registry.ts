@@ -67,34 +67,9 @@ const fallback = new FallbackModelContext();
 
 function uniqueContexts(): ModelContextLike[] {
   const found: ModelContextLike[] = [fallback];
-  if (typeof document !== 'undefined' && document.modelContext && document.modelContext !== fallback) {
-    found.push(document.modelContext);
-  }
-  if (
-    typeof navigator !== 'undefined' &&
-    navigator.modelContext &&
-    navigator.modelContext !== fallback &&
-    navigator.modelContext !== document.modelContext
-  ) {
-    found.push(navigator.modelContext);
-  }
+  const native = typeof document !== 'undefined' ? document.modelContext : undefined;
+  if (native && native !== fallback) found.push(native);
   return found;
-}
-
-export function hasNativeModelContext(): boolean {
-  if (typeof document === 'undefined') return false;
-  const ctx = document.modelContext || navigator.modelContext;
-  return Boolean(ctx && ctx !== fallback);
-}
-
-export function getModelContext(): ModelContextLike {
-  if (typeof document !== 'undefined' && document.modelContext) {
-    return document.modelContext;
-  }
-  if (typeof navigator !== 'undefined' && navigator.modelContext) {
-    return navigator.modelContext;
-  }
-  return fallback;
 }
 
 export function installWebmcpPolyfill(): { native: boolean } {
@@ -160,4 +135,3 @@ export async function registerToolEverywhere(
   }
 }
 
-export { fallback as webmcpFallback };

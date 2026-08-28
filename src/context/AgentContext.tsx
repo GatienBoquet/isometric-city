@@ -34,7 +34,6 @@ interface AgentContextValue {
   role: AgentRole;
   pendingPlan: PendingPlan | null;
   highlights: AgentHighlight[];
-  notes: string[];
   lastToolName: string | null;
   undoCount: number;
   focus: { x: number; y: number } | null;
@@ -69,7 +68,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [role, setRoleState] = useState<AgentRole>('advisor');
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
   const [highlights, setHighlights] = useState<AgentHighlight[]>([]);
-  const [notes, setNotes] = useState<string[]>([]);
   const [lastToolName, setLastToolName] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<UndoRecord[]>([]);
   const [focus, setFocus] = useState<{ x: number; y: number } | null>(null);
@@ -233,7 +231,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setUndoStack((stack) => [...stack.slice(-19), undo]);
       setPendingPlan(null);
       setLastError(null);
-      setNotes((prev) => [...prev.slice(-8), appliedNote]);
       setHighlights(
         plan.placements.map((p) => ({ x: p.x, y: p.y, kind: 'ok' as const, label: 'built' })),
       );
@@ -394,7 +391,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         case 'add_agent_note': {
           const text = typeof input.message === 'string' ? input.message.slice(0, 240) : '';
           if (!text) return { ok: false, error: 'message is required' };
-          setNotes((prev) => [...prev.slice(-8), text]);
           pushLog('note', text);
           addNotification('Second Mayor', text, '💬');
           return { ok: true, message: text };
@@ -562,7 +558,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       role,
       pendingPlan,
       highlights,
-      notes,
       lastToolName,
       undoCount: undoStack.length,
       focus,
@@ -581,7 +576,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       role,
       pendingPlan,
       highlights,
-      notes,
       lastToolName,
       undoStack.length,
       focus,

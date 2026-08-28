@@ -12,7 +12,6 @@ const KIND_LABEL: Record<AgentLogKind, { tag: string; className: string }> = {
   undone: { tag: 'undo', className: 'text-sky-300' },
   note: { tag: 'said', className: 'text-slate-200' },
   role: { tag: 'mode', className: 'text-violet-300' },
-  looked: { tag: 'looked', className: 'text-slate-400' },
 };
 
 function formatTime(at: number) {

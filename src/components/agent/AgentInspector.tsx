@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAgent } from '@/context/AgentContext';
 
 const PRESETS: Array<{ name: string; args: Record<string, unknown> }> = [
@@ -19,11 +19,18 @@ const PRESETS: Array<{ name: string; args: Record<string, unknown> }> = [
 
 export function AgentInspector() {
   const agent = useAgent();
+  const [debug, setDebug] = useState(false);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('get_city_state');
   const [argsText, setArgsText] = useState('{}');
   const [result, setResult] = useState('');
   const names = useMemo(() => PRESETS.map((p) => p.name), []);
+
+  useEffect(() => {
+    setDebug(new URLSearchParams(window.location.search).get('debug') === '1');
+  }, []);
+
+  if (!debug) return null;
 
   const run = async () => {
     let parsed: Record<string, unknown> = {};

@@ -45,7 +45,7 @@ export interface UndoRecord {
   createdAt: number;
 }
 
-export type AgentLogKind = 'proposed' | 'applied' | 'rejected' | 'undone' | 'note' | 'role' | 'looked';
+export type AgentLogKind = 'proposed' | 'applied' | 'rejected' | 'undone' | 'note' | 'role';
 
 export interface AgentLogEntry {
   id: string;
