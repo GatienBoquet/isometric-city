@@ -13,6 +13,8 @@ import { decompressFromUTF16, compressToUTF16 } from 'lz-string';
 import { LanguageSelector } from '@/components/ui/LanguageSelector';
 import { T } from 'gt-next';
 import { Users, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { setLaunchMode } from '@/lib/launchGame';
 
 const STORAGE_KEY = 'isocity-game-state';
 const SAVED_CITIES_INDEX_KEY = 'isocity-saved-cities-index';
@@ -327,6 +329,12 @@ export default function HomePage() {
   const [pendingRoomCode, setPendingRoomCode] = useState<string | null>(null);
   const { isMobileDevice, isSmallScreen } = useMobile();
   const isMobile = isMobileDevice || isSmallScreen;
+  const router = useRouter();
+
+  const goPlay = (mode: 'new' | 'continue') => {
+    setLaunchMode(mode);
+    router.push('/play');
+  };
 
   // Check for saved game and room code in URL after mount
   useEffect(() => {
@@ -345,8 +353,8 @@ export default function HomePage() {
       }
       const play = params.get('play');
       if (play === 'new' || play === 'agent') {
-        setStartFreshGame(true);
-        setShowGame(true);
+        setLaunchMode('new');
+        router.replace('/play');
         return;
       }
       if (play === 'example') {
@@ -359,12 +367,14 @@ export default function HomePage() {
           } catch (e) {
             console.error('Failed to load example city', e);
           }
-          setShowGame(true);
+          setLaunchMode('continue');
+          router.replace('/play');
         })();
         return;
       }
-      if (play === '1') {
-        setShowGame(true);
+      if (play === '1' || play === 'continue') {
+        setLaunchMode('continue');
+        router.replace('/play');
       }
     };
     // setTimeout so this still runs in background tabs (rAF is throttled to 0 there)
@@ -398,7 +408,7 @@ export default function HomePage() {
       const saved = localStorage.getItem(SAVED_CITY_PREFIX + city.id);
       if (saved) {
         localStorage.setItem(STORAGE_KEY, saved);
-        setShowGame(true);
+        goPlay('continue');
       }
     } catch {
       console.error('Failed to load saved city');
@@ -511,7 +521,7 @@ export default function HomePage() {
           {/* Buttons - more compact */}
           <div className="flex flex-col gap-2 sm:gap-3 w-full max-w-xs flex-shrink-0">
             <Button 
-              onClick={() => setShowGame(true)}
+              onClick={() => goPlay(hasSaved ? 'continue' : 'new')}
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
             >
               {hasSaved ? <T>Continue</T> : <T>New Game</T>}
@@ -525,13 +535,7 @@ export default function HomePage() {
               <T>Co-op</T>
             </Button>
             <Button
-              onClick={() => {
-                const q = new URLSearchParams(window.location.search);
-                q.set('play', 'new');
-                window.history.replaceState({}, '', `/?${q.toString()}`);
-                setStartFreshGame(true);
-                setShowGame(true);
-              }}
+              onClick={() => goPlay('new')}
               variant="outline"
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
             >
@@ -553,7 +557,7 @@ export default function HomePage() {
                 } catch (e) {
                   console.error('Failed to save example state:', e);
                 }
-                setShowGame(true);
+                goPlay('continue');
               }}
               variant="outline"
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"
@@ -633,7 +637,7 @@ export default function HomePage() {
             </h1>
             <div className="flex flex-col gap-3">
               <Button 
-                onClick={() => setShowGame(true)}
+                onClick={() => goPlay(hasSaved ? 'continue' : 'new')}
                 className="w-80 py-8 text-2xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
               >
                 {hasSaved ? <T>Continue</T> : <T>New Game</T>}
@@ -646,13 +650,7 @@ export default function HomePage() {
                 <T>Co-op</T>
               </Button>
               <Button
-                onClick={() => {
-                  const q = new URLSearchParams(window.location.search);
-                  q.set('play', 'new');
-                  window.history.replaceState({}, '', `/?${q.toString()}`);
-                  setStartFreshGame(true);
-                  setShowGame(true);
-                }}
+                onClick={() => goPlay('new')}
                 variant="outline"
                 className="w-80 py-8 text-xl font-light tracking-wide px-4 bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
               >
@@ -673,7 +671,7 @@ export default function HomePage() {
                   } catch (e) {
                     console.error('Failed to save example state:', e);
                   }
-                  setShowGame(true);
+                  goPlay('continue');
                 }}
                 variant="outline"
                 className="w-80 py-8 text-2xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"

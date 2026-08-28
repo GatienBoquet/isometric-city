@@ -648,7 +648,9 @@ function deleteCityState(cityId: string): void {
 
 export function GameProvider({ children, startFresh = false }: { children: React.ReactNode; startFresh?: boolean }) {
   // Start with a default state, we'll load from localStorage after mount (unless startFresh is true)
-  const [state, setState] = useState<GameState>(() => createInitialGameState(DEFAULT_GRID_SIZE, 'IsoCity'));
+  const [state, setState] = useState<GameState>(() =>
+    createInitialGameState(DEFAULT_GRID_SIZE, startFresh ? 'New City' : 'IsoCity'),
+  );
   
   const [hasExistingGame, setHasExistingGame] = useState(false);
   const [isStateReady, setIsStateReady] = useState(false);
@@ -686,18 +688,20 @@ export function GameProvider({ children, startFresh = false }: { children: React
     const cities = loadSavedCitiesIndex();
     setSavedCities(cities);
     
-    // Load game state (unless startFresh is true - used for co-op to start with a new city)
-    if (!startFresh) {
+    if (startFresh) {
+      const freshState = createInitialGameState(DEFAULT_GRID_SIZE, 'New City');
+      setState(freshState);
+      saveGameState(freshState);
+      setHasExistingGame(false);
+    } else {
       const saved = loadGameState();
       if (saved) {
-        skipNextSaveRef.current = true; // Set skip flag BEFORE updating state
+        skipNextSaveRef.current = true;
         setState(saved);
         setHasExistingGame(true);
       } else {
         setHasExistingGame(false);
       }
-    } else {
-      setHasExistingGame(false);
     }
     // Mark as loaded immediately - the skipNextSaveRef will handle skipping the first save
     hasLoadedRef.current = true;
