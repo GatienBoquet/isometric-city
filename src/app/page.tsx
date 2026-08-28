@@ -344,7 +344,12 @@ export default function HomePage() {
         return;
       }
       const play = params.get('play');
-      if (play === 'example' || play === 'agent') {
+      if (play === 'new' || play === 'agent') {
+        setStartFreshGame(true);
+        setShowGame(true);
+        return;
+      }
+      if (play === 'example') {
         void (async () => {
           try {
             const response = await fetch('/example-states/example_state_9.json');
@@ -521,14 +526,11 @@ export default function HomePage() {
             </Button>
             <Button
               onClick={() => {
-                window.history.replaceState({}, '', '/?play=example');
-                void (async () => {
-                  const response = await fetch('/example-states/example_state_9.json');
-                  const exampleState = await response.json();
-                  const compressed = compressToUTF16(JSON.stringify(exampleState));
-                  localStorage.setItem(STORAGE_KEY, compressed);
-                  setShowGame(true);
-                })();
+                const q = new URLSearchParams(window.location.search);
+                q.set('play', 'new');
+                window.history.replaceState({}, '', `/?${q.toString()}`);
+                setStartFreshGame(true);
+                setShowGame(true);
               }}
               variant="outline"
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
@@ -632,30 +634,27 @@ export default function HomePage() {
             <div className="flex flex-col gap-3">
               <Button 
                 onClick={() => setShowGame(true)}
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
+                className="w-80 py-8 text-2xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
               >
                 {hasSaved ? <T>Continue</T> : <T>New Game</T>}
               </Button>
               <Button
                 onClick={() => setShowCoopModal(true)}
                 variant="outline"
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/15 rounded-none transition-all duration-300"
+                className="w-80 py-8 text-2xl font-light tracking-wide bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/15 rounded-none transition-all duration-300"
               >
                 <T>Co-op</T>
               </Button>
               <Button
                 onClick={() => {
-                  window.history.replaceState({}, '', '/?play=example');
-                  void (async () => {
-                    const response = await fetch('/example-states/example_state_9.json');
-                    const exampleState = await response.json();
-                    const compressed = compressToUTF16(JSON.stringify(exampleState));
-                    localStorage.setItem(STORAGE_KEY, compressed);
-                    setShowGame(true);
-                  })();
+                  const q = new URLSearchParams(window.location.search);
+                  q.set('play', 'new');
+                  window.history.replaceState({}, '', `/?${q.toString()}`);
+                  setStartFreshGame(true);
+                  setShowGame(true);
                 }}
                 variant="outline"
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
+                className="w-80 py-8 text-xl font-light tracking-wide px-4 bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
               >
                 <T>Play with Second Mayor</T>
               </Button>
@@ -677,11 +676,11 @@ export default function HomePage() {
                   setShowGame(true);
                 }}
                 variant="outline"
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"
+                className="w-80 py-8 text-2xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"
               >
                 <T>Load Example</T>
               </Button>
-              <div className="flex items-start justify-between w-64">
+              <div className="flex items-start justify-between w-80">
                 <div className="flex flex-col">
                   <a
                     href="https://cursor.com"
@@ -706,7 +705,7 @@ export default function HomePage() {
             
             {/* Saved Cities */}
             {savedCities.length > 0 && (
-              <div className="w-64">
+              <div className="w-80">
                 <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">
                   <T>Saved Cities</T>
                 </h2>
