@@ -35,14 +35,27 @@ import {
 import { MiniMap } from '@/components/game/MiniMap';
 import { TopBar, StatsPanel } from '@/components/game/TopBar';
 import { CanvasIsometricGrid } from '@/components/game/CanvasIsometricGrid';
+import { AgentHud } from '@/components/agent/AgentHud';
+import { AgentInspector } from '@/components/agent/AgentInspector';
+import { AgentOverlayCanvas } from '@/components/agent/AgentOverlayCanvas';
+import { AgentProvider, useAgent } from '@/context/AgentContext';
 
 // Cargo type names for notifications
 const CARGO_TYPE_NAMES = [msg('containers'), msg('bulk materials'), msg('oil')];
 
 export default function Game({ onExit }: { onExit?: () => void }) {
+  return (
+    <AgentProvider>
+      <GameScreen onExit={onExit} />
+    </AgentProvider>
+  );
+}
+
+function GameScreen({ onExit }: { onExit?: () => void }) {
   const gt = useGT();
   const m = useMessages();
   const { state, setTool, setActivePanel, addMoney, addNotification, setSpeed } = useGame();
+  const agent = useAgent();
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('none');
   const [selectedTile, setSelectedTile] = useState<{ x: number; y: number } | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<{ x: number; y: number } | null>(null);
@@ -186,6 +199,12 @@ export default function Game({ onExit }: { onExit?: () => void }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [state.activePanel, state.selectedTool, state.speed, selectedTile, setActivePanel, setTool, setSpeed, overlayMode]);
 
+  useEffect(() => {
+    if (agent.focus) {
+      setNavigationTarget(agent.focus);
+    }
+  }, [agent.focus]);
+
   // Handle cheat code triggers
   useEffect(() => {
     if (!triggeredCheat) return;
@@ -266,8 +285,12 @@ export default function Game({ onExit }: { onExit?: () => void }) {
               selectedTile={selectedTile} 
               setSelectedTile={setSelectedTile}
               isMobile={true}
+              onViewportChange={setViewport}
               onBargeDelivery={handleBargeDelivery}
             />
+            <AgentOverlayCanvas viewport={viewport} />
+            <AgentHud />
+            <AgentInspector />
             
             {/* Multiplayer Players Indicator - Mobile */}
             {isMultiplayer && (
@@ -324,7 +347,7 @@ export default function Game({ onExit }: { onExit?: () => void }) {
           {/* Tip Toast for helping new players */}
           <TipToast
             message={currentTip || ''}
-            isVisible={isTipVisible}
+            isVisible={isTipVisible && !agent.pendingPlan}
             onContinue={onTipContinue}
             onSkipAll={onTipSkipAll}
           />
@@ -352,6 +375,9 @@ export default function Game({ onExit }: { onExit?: () => void }) {
               onViewportChange={setViewport}
               onBargeDelivery={handleBargeDelivery}
             />
+            <AgentOverlayCanvas viewport={viewport} />
+            <AgentHud />
+            <AgentInspector />
             <OverlayModeToggle overlayMode={overlayMode} setOverlayMode={setOverlayMode} />
             <MiniMap onNavigate={(x, y) => setNavigationTarget({ x, y })} viewport={viewport} />
             
@@ -404,7 +430,7 @@ export default function Game({ onExit }: { onExit?: () => void }) {
         {/* Tip Toast for helping new players */}
         <TipToast
           message={currentTip || ''}
-          isVisible={isTipVisible}
+          isVisible={isTipVisible && !agent.pendingPlan}
           onContinue={onTipContinue}
           onSkipAll={onTipSkipAll}
         />

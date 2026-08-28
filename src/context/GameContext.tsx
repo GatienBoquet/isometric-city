@@ -103,6 +103,7 @@ type GameContextValue = {
   loadSavedCity: (cityId: string) => boolean;
   deleteSavedCity: (cityId: string) => void;
   renameSavedCity: (cityId: string, newName: string) => void;
+  mutateGameState: (recipe: (prev: GameState) => GameState) => void;
 };
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -825,7 +826,9 @@ export function GameProvider({ children, startFresh = false }: { children: React
         // React state is only needed for UI elements (stats, budget display)
         if (now - lastUiSyncRef.current >= 500) {
           lastUiSyncRef.current = now;
-          setState(newState);
+          // Always read the live ref at apply time so an in-between agent
+          // mutation is not overwritten by this captured tick snapshot.
+          setState(() => latestStateRef.current);
         }
       }, interval);
     }
@@ -1604,7 +1607,14 @@ export function GameProvider({ children, startFresh = false }: { children: React
     });
   }, []);
 
-  // Rename a saved city
+  const mutateGameState = useCallback((recipe: (prev: GameState) => GameState) => {
+    const base = latestStateRef.current;
+    const next = recipe(base);
+    latestStateRef.current = next;
+    stateChangedRef.current = true;
+    setState(() => latestStateRef.current);
+  }, []);
+
   const renameSavedCity = useCallback((cityId: string, newName: string) => {
     // Load the city state, update the name, and save it back
     const cityState = loadCityState(cityId);
@@ -1675,6 +1685,7 @@ export function GameProvider({ children, startFresh = false }: { children: React
     loadSavedCity,
     deleteSavedCity,
     renameSavedCity,
+    mutateGameState,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

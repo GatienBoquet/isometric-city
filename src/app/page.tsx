@@ -343,11 +343,28 @@ export default function HomePage() {
         window.location.replace(`/coop/${roomCode.toUpperCase()}`);
         return;
       }
-      // Always show landing page - don't auto-load into game
-      // User can select from saved cities or start new
+      const play = params.get('play');
+      if (play === 'example' || play === 'agent') {
+        void (async () => {
+          try {
+            const response = await fetch('/example-states/example_state_9.json');
+            const exampleState = await response.json();
+            const compressed = compressToUTF16(JSON.stringify(exampleState));
+            localStorage.setItem(STORAGE_KEY, compressed);
+          } catch (e) {
+            console.error('Failed to load example city', e);
+          }
+          setShowGame(true);
+        })();
+        return;
+      }
+      if (play === '1') {
+        setShowGame(true);
+      }
     };
-    // Use requestAnimationFrame to avoid synchronous setState in effect
-    requestAnimationFrame(checkSavedGame);
+    // setTimeout so this still runs in background tabs (rAF is throttled to 0 there)
+    const timer = window.setTimeout(checkSavedGame, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // Handle exit from game - refresh saved cities list
@@ -502,6 +519,22 @@ export default function HomePage() {
             >
               <T>Co-op</T>
             </Button>
+            <Button
+              onClick={() => {
+                window.history.replaceState({}, '', '/?play=example');
+                void (async () => {
+                  const response = await fetch('/example-states/example_state_9.json');
+                  const exampleState = await response.json();
+                  const compressed = compressToUTF16(JSON.stringify(exampleState));
+                  localStorage.setItem(STORAGE_KEY, compressed);
+                  setShowGame(true);
+                })();
+              }}
+              variant="outline"
+              className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
+            >
+              <T>Play with Second Mayor</T>
+            </Button>
 
             <Button
               onClick={async () => {
@@ -609,6 +642,22 @@ export default function HomePage() {
                 className="w-64 py-8 text-2xl font-light tracking-wide bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/15 rounded-none transition-all duration-300"
               >
                 <T>Co-op</T>
+              </Button>
+              <Button
+                onClick={() => {
+                  window.history.replaceState({}, '', '/?play=example');
+                  void (async () => {
+                    const response = await fetch('/example-states/example_state_9.json');
+                    const exampleState = await response.json();
+                    const compressed = compressToUTF16(JSON.stringify(exampleState));
+                    localStorage.setItem(STORAGE_KEY, compressed);
+                    setShowGame(true);
+                  })();
+                }}
+                variant="outline"
+                className="w-64 py-8 text-2xl font-light tracking-wide bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
+              >
+                <T>Play with Second Mayor</T>
               </Button>
               <Button
                 onClick={async () => {

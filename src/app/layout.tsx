@@ -22,10 +22,10 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   metadataBase: new URL('https://iso-city.com'),
   title: {
-    default: 'ISOCITY — Metropolis Builder',
-    template: 'ISOCITY — %s',
+    default: 'Second Mayor — IsoCity + WebMCP',
+    template: 'Second Mayor — %s',
   },
-  description: 'A richly detailed isometric city builder. Build your metropolis and manage resources with cars, planes, helicopters, boats, trains, citizens, and more.',
+  description: 'Co-op isometric city builder: play IsoCity with an on-page AI partner via WebMCP. You stay in control; the agent inspects, ghosts plans, and waits for your approval.',
   openGraph: {
     title: 'ISOCITY — Metropolis Builder',
     description: 'A richly detailed isometric city builder. Build your metropolis and manage resources with cars, planes, helicopters, boats, trains, citizens, and more.',
