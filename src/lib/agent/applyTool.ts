@@ -149,3 +149,20 @@ export function cloneTile(tile: Tile): Tile {
     building: { ...tile.building },
   };
 }
+
+/** Origin plus multi-tile footprint (hospital 2x2, university 3x3, ...). */
+export function tilesAffectedByPlacement(
+  state: GameState,
+  placement: { x: number; y: number; tool: Tool },
+): { x: number; y: number }[] {
+  const size = Math.max(1, TOOL_INFO[placement.tool]?.size ?? 1);
+  const cells: { x: number; y: number }[] = [];
+  for (let dy = 0; dy < size; dy++) {
+    for (let dx = 0; dx < size; dx++) {
+      const x = placement.x + dx;
+      const y = placement.y + dy;
+      if (state.grid[y]?.[x]) cells.push({ x, y });
+    }
+  }
+  return cells;
+}

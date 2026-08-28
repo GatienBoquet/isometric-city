@@ -280,15 +280,17 @@ function GameScreen({ onExit }: { onExit?: () => void }) {
           
           {/* Main canvas area - fills remaining space, with padding for top/bottom bars */}
           <div className="flex-1 relative overflow-hidden" style={{ paddingTop: '72px', paddingBottom: '76px' }}>
-            <CanvasIsometricGrid 
-              overlayMode={overlayMode} 
-              selectedTile={selectedTile} 
-              setSelectedTile={setSelectedTile}
-              isMobile={true}
-              onViewportChange={setViewport}
-              onBargeDelivery={handleBargeDelivery}
-            />
-            <AgentOverlayCanvas viewport={viewport} />
+            <div className="relative w-full h-full">
+              <CanvasIsometricGrid 
+                overlayMode={overlayMode} 
+                selectedTile={selectedTile} 
+                setSelectedTile={setSelectedTile}
+                isMobile={true}
+                onViewportChange={setViewport}
+                onBargeDelivery={handleBargeDelivery}
+              />
+              <AgentOverlayCanvas viewport={viewport} />
+            </div>
             <AgentHud />
             <AgentInspector />
             

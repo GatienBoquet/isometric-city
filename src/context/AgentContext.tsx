@@ -12,7 +12,7 @@ import { flushSync } from 'react-dom';
 import { useGame } from '@/context/GameContext';
 import { Budget, GameState, Tool } from '@/types/game';
 import { createBridgesOnPath } from '@/lib/simulation';
-import { applyToolAtTile, cloneTile } from '@/lib/agent/applyTool';
+import { applyToolAtTile, cloneTile, tilesAffectedByPlacement } from '@/lib/agent/applyTool';
 import { findProblems, inspectRegion, summarizeCity } from '@/lib/agent/inspect';
 import { findBuildablePath, tilesInRect } from '@/lib/agent/path';
 import {
@@ -98,11 +98,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const seen = new Set<string>();
     const tiles: UndoRecord['tiles'] = [];
     for (const p of placements) {
-      const key = `${p.x},${p.y}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const tile = state.grid[p.y]?.[p.x];
-      if (tile) tiles.push({ x: p.x, y: p.y, tile: cloneTile(tile) });
+      for (const cell of tilesAffectedByPlacement(state, p)) {
+        const key = `${cell.x},${cell.y}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const tile = state.grid[cell.y]?.[cell.x];
+        if (tile) tiles.push({ x: cell.x, y: cell.y, tile: cloneTile(tile) });
+      }
     }
     return tiles;
   }, [latestStateRef]);
@@ -165,7 +167,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       id: `undo-${Date.now()}`,
       description: plan.title,
       tiles: snapshotTiles(plan.placements),
-      money: moneyBefore,
       taxRate: plan.taxRate !== undefined ? state.taxRate : undefined,
       budget: plan.budget
         ? { key: plan.budget.key, funding: state.budget[plan.budget.key].funding }
@@ -224,6 +225,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error, attempted: plan.placements.length };
     }
 
+    undo.moneySpent = Math.max(0, moneyBefore - latestStateRef.current.stats.money);
     pendingRef.current = null;
     const appliedNote = `Applied: ${plan.title}${appliedCount ? ` (${appliedCount} tiles)` : ''}`;
     pushLog('applied', appliedNote);
@@ -261,8 +263,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         newGrid[snap.y][snap.x] = cloneTile(snap.tile);
       }
       let next: GameState = { ...prev, grid: newGrid };
-      if (record.money !== undefined) {
-        next = { ...next, stats: { ...next.stats, money: record.money } };
+      if (record.moneySpent) {
+        next = {
+          ...next,
+          stats: { ...next.stats, money: next.stats.money + record.moneySpent },
+        };
       }
       if (record.taxRate !== undefined) {
         next = { ...next, taxRate: record.taxRate };

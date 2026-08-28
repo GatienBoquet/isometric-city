@@ -38,7 +38,8 @@ export interface UndoRecord {
   id: string;
   description: string;
   tiles: TileSnapshot[];
-  money?: number;
+  /** Amount the plan spent; refunded on undo without restoring the whole balance. */
+  moneySpent?: number;
   taxRate?: number;
   budget?: { key: keyof Budget; funding: number };
   createdAt: number;
