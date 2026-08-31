@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { T, useGT } from 'gt-next';
 import { useAgent } from '@/context/AgentContext';
+import { useIsClient } from '@/hooks/useIsClient';
 import type { AgentLogKind } from '@/lib/agent/types';
 
 const KIND_LABEL: Record<AgentLogKind, { tag: string; className: string }> = {
@@ -19,21 +21,23 @@ function formatTime(at: number) {
 }
 
 export function AgentHud() {
+  const gt = useGT();
   const agent = useAgent();
   const plan = agent.pendingPlan;
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsClient();
   const [logOpen, setLogOpen] = useState(false);
   const log = [...agent.log].reverse();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
+  // The panel sits above the approval banner, and steps out of its way while a
+  // plan is pending: the banner tells the human to use the mode toggle, so the
+  // toggle has to stay reachable.
   const panel =
     mounted &&
     createPortal(
       <div
-        className="fixed z-40 pointer-events-auto w-[min(380px,calc(100%-1.5rem))] max-md:left-3 max-md:bottom-28 md:left-[15.5rem] md:bottom-28"
+        className={`fixed z-[10060] pointer-events-auto w-[min(380px,calc(100%-1.5rem))] max-md:left-3 md:left-[15.5rem] ${
+          plan ? 'max-md:bottom-[19rem] md:bottom-[17rem]' : 'max-md:bottom-28 md:bottom-28'
+        }`}
         data-testid="agent-hud"
       >
         <div className="rounded-xl border border-sky-400/30 bg-slate-950/92 backdrop-blur-md shadow-2xl px-3 py-3 text-sm text-slate-100">
@@ -62,7 +66,7 @@ export function AgentHud() {
                 }`}
                 onClick={() => agent.setRole('advisor')}
               >
-                Advisor
+                <T>Advisor</T>
               </button>
               <button
                 type="button"
@@ -74,10 +78,19 @@ export function AgentHud() {
                 onClick={() => agent.setRole('co-builder')}
                 data-testid="role-cobuilder"
               >
-                Co-builder
+                <T>Co-builder</T>
               </button>
             </div>
           </div>
+
+          {agent.readOnly && (
+            <p
+              className="mt-2 text-[11px] leading-snug text-amber-200/80"
+              data-testid="agent-readonly-notice"
+            >
+              <T>Advisor only in co-op: agent builds are not sent to the other player.</T>
+            </p>
+          )}
 
           <div className="mt-2 flex items-center justify-between gap-2">
             <button
@@ -86,7 +99,7 @@ export function AgentHud() {
               onClick={() => setLogOpen((open) => !open)}
               className="text-[11px] text-slate-300 hover:text-white"
             >
-              {logOpen ? 'Hide actions' : 'Show actions'}
+              {logOpen ? gt('Hide actions') : gt('Show actions')}
               {log.length > 0 ? ` (${log.length})` : ''}
               <span className="ml-1 text-slate-500">{logOpen ? '▾' : '▸'}</span>
             </button>
@@ -97,7 +110,7 @@ export function AgentHud() {
                 onClick={() => agent.undoAgent()}
                 className="text-[11px] text-sky-300 hover:text-sky-100"
               >
-                Undo ({agent.undoCount})
+                <T>Undo</T> ({agent.undoCount})
               </button>
             )}
           </div>
@@ -105,7 +118,9 @@ export function AgentHud() {
           {logOpen && (
             <div className="mt-2 border-t border-white/10 pt-2">
               {log.length === 0 ? (
-                <p className="text-[12px] text-slate-500">Nothing yet. When the agent proposes or builds, it shows up here.</p>
+                <p className="text-[12px] text-slate-500">
+                  <T>Nothing yet. When the agent proposes or builds, it shows up here.</T>
+                </p>
               ) : (
                 <ul
                   className="max-h-40 overflow-y-auto space-y-1.5 pr-1"
@@ -143,7 +158,7 @@ export function AgentHud() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.2em] text-amber-300">
-                    Second Mayor needs you
+                    <T>Second Mayor needs you</T>
                   </div>
                   <div className="mt-1 text-lg font-semibold text-amber-50">{plan.title}</div>
                 </div>
@@ -172,7 +187,7 @@ export function AgentHud() {
                   }}
                   className="min-w-[140px] px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-sm font-bold shadow-lg"
                 >
-                  Approve
+                  <T>Approve</T>
                 </button>
                 <button
                   type="button"
@@ -185,7 +200,7 @@ export function AgentHud() {
                   }}
                   className="min-w-[120px] px-5 py-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-semibold"
                 >
-                  Reject
+                  <T>Reject</T>
                 </button>
               </div>
             </div>

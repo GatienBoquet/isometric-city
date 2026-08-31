@@ -199,11 +199,13 @@ function GameScreen({ onExit }: { onExit?: () => void }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [state.activePanel, state.selectedTool, state.speed, selectedTile, setActivePanel, setTool, setSpeed, overlayMode]);
 
-  useEffect(() => {
-    if (agent.focus) {
-      setNavigationTarget(agent.focus);
-    }
-  }, [agent.focus]);
+  // The agent's focus tile drives the camera directly rather than through an
+  // effect that mirrors it into navigationTarget.
+  const cameraTarget = agent.focus ?? navigationTarget;
+  const onCameraArrived = () => {
+    setNavigationTarget(null);
+    agent.clearFocus();
+  };
 
   // Handle cheat code triggers
   useEffect(() => {
@@ -286,6 +288,8 @@ function GameScreen({ onExit }: { onExit?: () => void }) {
                 selectedTile={selectedTile} 
                 setSelectedTile={setSelectedTile}
                 isMobile={true}
+                navigationTarget={cameraTarget}
+                onNavigationComplete={onCameraArrived}
                 onViewportChange={setViewport}
                 onBargeDelivery={handleBargeDelivery}
               />
@@ -372,8 +376,8 @@ function GameScreen({ onExit }: { onExit?: () => void }) {
               overlayMode={overlayMode} 
               selectedTile={selectedTile} 
               setSelectedTile={setSelectedTile}
-              navigationTarget={navigationTarget}
-              onNavigationComplete={() => setNavigationTarget(null)}
+              navigationTarget={cameraTarget}
+              onNavigationComplete={onCameraArrived}
               onViewportChange={setViewport}
               onBargeDelivery={handleBargeDelivery}
             />

@@ -10,9 +10,10 @@ import React, {
 } from 'react';
 import { flushSync } from 'react-dom';
 import { useGame } from '@/context/GameContext';
-import { Budget, GameState, Tool } from '@/types/game';
+import { useMultiplayerOptional } from '@/context/MultiplayerContext';
+import { Budget, GameState, TOOL_INFO, Tool } from '@/types/game';
 import { createBridgesOnPath } from '@/lib/simulation';
-import { applyToolAtTile, cloneTile, tilesAffectedByPlacement } from '@/lib/agent/applyTool';
+import { applyToolAtTile, cloneTile, diffChangedTiles, isPlaceableTool } from '@/lib/placement';
 import { findProblems, inspectRegion, summarizeCity } from '@/lib/agent/inspect';
 import { findBuildablePath, tilesInRect } from '@/lib/agent/path';
 import {
@@ -37,7 +38,10 @@ interface AgentContextValue {
   lastToolName: string | null;
   undoCount: number;
   focus: { x: number; y: number } | null;
+  clearFocus: () => void;
   webmcpNative: boolean;
+  /** True while a co-op room is active: the agent may look but not build. */
+  readOnly: boolean;
   player: typeof AGENT_PLAYER;
   setRole: (role: AgentRole) => { ok: boolean; role: AgentRole };
   setWebmcpNative: (native: boolean) => void;
@@ -51,19 +55,37 @@ interface AgentContextValue {
 
 const AgentContext = createContext<AgentContextValue | null>(null);
 
+const READ_ONLY_REASON =
+  'Second Mayor is advisory only during co-op: agent builds are not sent to the other player, so they would desync the city. Leave the room to build together with the agent.';
+
 function clampInt(value: unknown, fallback: number): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.round(n);
 }
 
-function asTool(value: unknown): Tool | null {
-  return typeof value === 'string' ? (value as Tool) : null;
+/** Human-readable list of tools a plan may reference, for error payloads. */
+function toolSuggestions(): string[] {
+  return ['road', 'rail', 'tree', 'park', 'police_station', 'fire_station', 'hospital', 'school'];
+}
+
+function readTool(value: unknown): { tool: Tool } | { error: string } {
+  if (typeof value !== 'string' || !value) {
+    return { error: `tool is required. Examples: ${toolSuggestions().join(', ')}.` };
+  }
+  if (!isPlaceableTool(value)) {
+    return {
+      error: `Unknown tool "${value}". Call get_tool_catalog for the full list. Examples: ${toolSuggestions().join(', ')}.`,
+    };
+  }
+  return { tool: value };
 }
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const game = useGame();
   const { latestStateRef, mutateGameState, addNotification } = game;
+  const multiplayer = useMultiplayerOptional();
+  const readOnly = Boolean(multiplayer?.roomCode);
 
   const [role, setRoleState] = useState<AgentRole>('advisor');
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
@@ -74,10 +96,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [webmcpNative, setWebmcpNative] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [log, setLog] = useState<AgentLogEntry[]>([]);
-  const roleRef = useRef(role);
-  const pendingRef = useRef(pendingPlan);
-  roleRef.current = role;
-  pendingRef.current = pendingPlan;
+
+  // Mirrors of state that tool calls read synchronously. Written only where the
+  // matching setState happens (never during render) so the React Compiler
+  // cannot memoize the write away.
+  const roleRef = useRef<AgentRole>('advisor');
+  const pendingRef = useRef<PendingPlan | null>(null);
 
   const pushLog = useCallback((kind: AgentLogKind, text: string) => {
     setLog((prev) => {
@@ -90,22 +114,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return [...prev.slice(-29), entry];
     });
   }, []);
-
-  const snapshotTiles = useCallback((placements: AgentPlacement[]): UndoRecord['tiles'] => {
-    const state = latestStateRef.current;
-    const seen = new Set<string>();
-    const tiles: UndoRecord['tiles'] = [];
-    for (const p of placements) {
-      for (const cell of tilesAffectedByPlacement(state, p)) {
-        const key = `${cell.x},${cell.y}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const tile = state.grid[cell.y]?.[cell.x];
-        if (tile) tiles.push({ x: cell.x, y: cell.y, tile: cloneTile(tile) });
-      }
-    }
-    return tiles;
-  }, [latestStateRef]);
 
   const makePlan = useCallback(
     (partial: Omit<PendingPlan, 'id' | 'createdAt'>): PendingPlan => ({
@@ -131,10 +139,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setRole = useCallback((next: AgentRole) => {
+    roleRef.current = next;
     setRoleState(next);
     pushLog('role', `Mode: ${next}`);
     return { ok: true, role: next };
   }, [pushLog]);
+
+  const clearFocus = useCallback(() => {
+    setFocus(null);
+  }, []);
 
   const rejectPlan = useCallback(() => {
     if (!pendingRef.current) {
@@ -159,18 +172,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error };
     }
 
-    const state = latestStateRef.current;
-    const moneyBefore = state.stats.money;
-    const undo: UndoRecord = {
-      id: `undo-${Date.now()}`,
-      description: plan.title,
-      tiles: snapshotTiles(plan.placements),
-      taxRate: plan.taxRate !== undefined ? state.taxRate : undefined,
-      budget: plan.budget
-        ? { key: plan.budget.key, funding: state.budget[plan.budget.key].funding }
-        : undefined,
-      createdAt: Date.now(),
-    };
+    if (readOnly) {
+      setLastError(READ_ONLY_REASON);
+      return { ok: false, error: READ_ONLY_REASON, readOnly: true };
+    }
+
+    const before = latestStateRef.current;
+    const moneyBefore = before.stats.money;
+    const gridBefore = before.grid;
 
     let appliedCount = 0;
     let policyChanged = false;
@@ -193,22 +202,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         };
         policyChanged = true;
       }
-      const roadTiles: { x: number; y: number }[] = [];
+      const trackTiles: { x: number; y: number }[] = [];
       appliedCount = 0;
       for (const placement of plan.placements) {
         const attempt = applyToolAtTile(next, placement.x, placement.y, placement.tool);
-        if (attempt !== next) {
-          appliedCount += 1;
-          next = attempt;
-        }
+        if (attempt === next) continue;
+        appliedCount += 1;
+        next = attempt;
         if (placement.tool === 'road' || placement.tool === 'rail') {
-          roadTiles.push({ x: placement.x, y: placement.y });
+          trackTiles.push({ x: placement.x, y: placement.y });
         }
       }
-      if (roadTiles.length > 1) {
+      if (trackTiles.length > 1) {
         next = createBridgesOnPath(
           next,
-          roadTiles,
+          trackTiles,
           plan.placements.some((p) => p.tool === 'rail') ? 'rail' : 'road',
         );
       }
@@ -223,7 +231,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error, attempted: plan.placements.length };
     }
 
-    undo.moneySpent = Math.max(0, moneyBefore - latestStateRef.current.stats.money);
+    const after = latestStateRef.current;
+    const undo: UndoRecord = {
+      id: `undo-${Date.now()}`,
+      description: plan.title,
+      // Diff instead of predicting a footprint: bulldozing one tile of a 3x3
+      // building clears all nine, and one bridge tile takes the whole span.
+      tiles: diffChangedTiles(gridBefore, after.grid),
+      moneySpent: Math.max(0, moneyBefore - after.stats.money),
+      taxRate: plan.taxRate !== undefined ? before.taxRate : undefined,
+      budget: plan.budget
+        ? { key: plan.budget.key, funding: before.budget[plan.budget.key].funding }
+        : undefined,
+      createdAt: Date.now(),
+    };
+
     pendingRef.current = null;
     const appliedNote = `Applied: ${plan.title}${appliedCount ? ` (${appliedCount} tiles)` : ''}`;
     pushLog('applied', appliedNote);
@@ -237,26 +259,29 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
     addNotification('Second Mayor', appliedNote, '🤝');
 
-    const after = latestStateRef.current;
     return {
       ok: true,
       applied: plan.title,
       tilesChanged: appliedCount,
+      tilesRestorableOnUndo: undo.tiles.length,
       moneySpent: moneyBefore - after.stats.money,
       money: after.stats.money,
       placements: plan.placements.length,
     };
-  }, [addNotification, latestStateRef, mutateGameState, pushLog, snapshotTiles]);
+  }, [addNotification, latestStateRef, mutateGameState, pushLog, readOnly]);
 
   const undoAgent = useCallback(() => {
     const record = undoStack[undoStack.length - 1];
     if (!record) return { ok: false, error: 'Nothing to undo.' };
 
+    if (readOnly) {
+      return { ok: false, error: READ_ONLY_REASON, readOnly: true };
+    }
+
     mutateGameState((prev) => {
       const newGrid = prev.grid.map((row) => row.slice());
       for (const snap of record.tiles) {
-        if (!newGrid[snap.y]) continue;
-        newGrid[snap.y] = newGrid[snap.y].slice();
+        if (!newGrid[snap.y]?.[snap.x]) continue;
         newGrid[snap.y][snap.x] = cloneTile(snap.tile);
       }
       let next: GameState = { ...prev, grid: newGrid };
@@ -284,11 +309,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
 
-    setUndoStack((stack) => stack.slice(0, -1));
+    flushSync(() => {
+      setUndoStack((stack) => stack.slice(0, -1));
+    });
     pushLog('undone', `Undid: ${record.description}`);
     addNotification('Second Mayor', `Undid: ${record.description}`, '↩️');
-    return { ok: true, undone: record.description, remaining: undoStack.length - 1 };
-  }, [addNotification, mutateGameState, pushLog, undoStack]);
+    return {
+      ok: true,
+      undone: record.description,
+      tilesRestored: record.tiles.length,
+      remaining: undoStack.length - 1,
+    };
+  }, [addNotification, mutateGameState, pushLog, readOnly, undoStack]);
 
   const runTool = useCallback(
     (name: string, input: Json = {}): Json => {
@@ -299,6 +331,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       switch (name) {
         case 'get_city_state':
           return { ok: true, ...summarizeCity(state) };
+        case 'get_tool_catalog':
+          return {
+            ok: true,
+            tools: Object.entries(TOOL_INFO)
+              .filter(([tool]) => isPlaceableTool(tool))
+              .map(([tool, info]) => ({
+                tool,
+                cost: info.cost,
+                size: info.size ?? 1,
+              })),
+          };
         case 'inspect_region': {
           const x = clampInt(input.x, 0);
           const y = clampInt(input.y, 0);
@@ -338,11 +381,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             ok: true,
             role: currentRole,
             player: AGENT_PLAYER,
+            readOnly: readOnly,
             pendingPlan: pendingRef.current
               ? { title: pendingRef.current.title, tiles: pendingRef.current.placements.length }
               : null,
             undoCount: undoStack.length,
-            note: 'Human stays in control. Writes are proposals until confirm_plan or the on-page Approve button.',
+            note: readOnly
+              ? READ_ONLY_REASON
+              : 'Human stays in control. Writes are proposals until the human clicks Approve, or until confirm_plan while the human has set co-builder mode.',
           };
         case 'highlight_tiles': {
           const raw = Array.isArray(input.tiles) ? input.tiles : [];
@@ -376,16 +422,25 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           ]);
           return { ok: true, x, y };
         }
+        case 'request_role':
         case 'set_agent_role': {
-          const next = input.role === 'co-builder' ? 'co-builder' : 'advisor';
-          setRoleState(next);
+          // The role is the human's control, not the agent's: an agent that
+          // could grant itself co-builder could commit without any approval.
+          const wanted = input.role === 'co-builder' ? 'co-builder' : 'advisor';
+          if (wanted === currentRole) {
+            return { ok: true, role: currentRole, note: `Already in ${currentRole} mode.` };
+          }
+          pushLog('note', `Asked for ${wanted} mode`);
+          addNotification(
+            'Second Mayor',
+            `Asks for ${wanted} mode — use the toggle in the Second Mayor panel.`,
+            '🙋',
+          );
           return {
-            ok: true,
-            role: next,
-            note:
-              next === 'advisor'
-                ? 'Advisor can inspect, highlight, and propose. The human must Approve.'
-                : 'Co-builder may call confirm_plan after proposing. Human can still reject or undo.',
+            ok: false,
+            needsHuman: true,
+            role: currentRole,
+            error: `Only the human can change the mode. Your request for ${wanted} mode is now showing in their HUD; keep proposing in the meantime.`,
           };
         }
         case 'add_agent_note': {
@@ -396,11 +451,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           return { ok: true, message: text };
         }
         case 'propose_zone_region': {
-          const zoneTool = asTool(input.zone) || asTool(input.tool);
+          const requested = input.zone ?? input.tool;
           const allowed: Tool[] = ['zone_residential', 'zone_commercial', 'zone_industrial', 'zone_dezone'];
-          if (!zoneTool || !allowed.includes(zoneTool)) {
-            return { ok: false, error: 'zone must be zone_residential | zone_commercial | zone_industrial | zone_dezone' };
+          if (typeof requested !== 'string' || !allowed.includes(requested as Tool)) {
+            return { ok: false, error: `zone must be one of: ${allowed.join(' | ')}` };
           }
+          const zoneTool = requested as Tool;
           const tiles = tilesInRect(
             clampInt(input.x1, 0),
             clampInt(input.y1, 0),
@@ -443,18 +499,30 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         }
         case 'propose_placements': {
           const raw = Array.isArray(input.placements) ? input.placements : [];
-          const placements: AgentPlacement[] = raw
-            .slice(0, MAX_PLAN_TILES)
-            .map((item) => {
-              const rec = item as Json;
-              return {
-                x: clampInt(rec.x, 0),
-                y: clampInt(rec.y, 0),
-                tool: (asTool(rec.tool) || 'tree') as Tool,
-              };
-            })
-            .filter((p) => state.grid[p.y]?.[p.x]);
-          if (!placements.length) return { ok: false, error: 'No valid placements.' };
+          const placements: AgentPlacement[] = [];
+          const rejected: Json[] = [];
+          for (const item of raw.slice(0, MAX_PLAN_TILES)) {
+            const rec = item as Json;
+            const parsed = readTool(rec.tool);
+            if ('error' in parsed) {
+              rejected.push({ x: rec.x, y: rec.y, tool: rec.tool, error: parsed.error });
+              continue;
+            }
+            const x = clampInt(rec.x, 0);
+            const y = clampInt(rec.y, 0);
+            if (!state.grid[y]?.[x]) {
+              rejected.push({ x, y, tool: parsed.tool, error: 'Tile out of bounds.' });
+              continue;
+            }
+            placements.push({ x, y, tool: parsed.tool });
+          }
+          if (!placements.length) {
+            return {
+              ok: false,
+              error: 'No valid placements.',
+              rejected,
+            };
+          }
           const plan = makePlan({
             title: `Place ${placements.length} items`,
             summary: `Ghost ${placements.length} tiles. Approve to build.`,
@@ -466,11 +534,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             placements.map((p) => ({ x: p.x, y: p.y, kind: 'ghost', label: p.tool })),
             placements[0],
           );
-          return { ok: true, needsConfirmation: true, plan };
+          return {
+            ok: true,
+            needsConfirmation: true,
+            plan,
+            ...(rejected.length ? { rejected } : {}),
+          };
         }
         case 'propose_service': {
-          const tool = asTool(input.tool);
-          if (!tool) return { ok: false, error: 'tool is required (e.g. fire_station, school, hospital).' };
+          const parsed = readTool(input.tool);
+          if ('error' in parsed) return { ok: false, error: parsed.error };
+          const tool = parsed.tool;
           const x = clampInt(input.x, 0);
           const y = clampInt(input.y, 0);
           if (!state.grid[y]?.[x]) return { ok: false, error: 'Tile out of bounds.' };
@@ -484,16 +558,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           return { ok: true, needsConfirmation: true, plan };
         }
         case 'propose_bulldoze': {
+          const x1 = clampInt(input.x1, 0);
+          const y1 = clampInt(input.y1, 0);
           const tiles = tilesInRect(
-            clampInt(input.x1, 0),
-            clampInt(input.y1, 0),
-            clampInt(input.x2 ?? input.x1, 0),
-            clampInt(input.y2 ?? input.y1, 0),
+            x1,
+            y1,
+            clampInt(input.x2 ?? input.x1, x1),
+            clampInt(input.y2 ?? input.y1, y1),
             state.gridSize,
           ).slice(0, 80);
+          if (tiles.length === 0) return { ok: false, error: 'Empty region.' };
           const plan = makePlan({
             title: `Bulldoze ${tiles.length} tiles`,
             summary: 'Ghost bulldoze. Approve to demolish.',
+            reason: typeof input.reason === 'string' ? input.reason : undefined,
             placements: tiles.map((t) => ({ ...t, tool: 'bulldoze' as Tool })),
           });
           revealPlan(
@@ -518,7 +596,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         case 'propose_budget': {
           const key = String(input.key || '') as keyof Budget;
           if (!state.budget[key]) {
-            return { ok: false, error: 'key must be police|fire|health|education|transportation|parks|power|water' };
+            return {
+              ok: false,
+              error: `key must be one of: ${Object.keys(state.budget).join(' | ')}`,
+            };
           }
           const funding = Math.max(0, Math.min(100, clampInt(input.funding, state.budget[key].funding)));
           const plan = makePlan({
@@ -532,10 +613,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           return { ok: true, needsConfirmation: true, plan };
         }
         case 'confirm_plan':
+          if (readOnly) {
+            return { ok: false, error: READ_ONLY_REASON, readOnly: true };
+          }
           if (currentRole !== 'co-builder') {
             return {
               ok: false,
-              error: 'Advisor cannot commit. Ask the human to click Approve, or set_agent_role to co-builder.',
+              error:
+                'Advisor mode: only the human can commit. Ask them to click Approve on the plan, or to switch the Second Mayor panel to co-builder.',
               needsHuman: true,
             };
           }
@@ -548,7 +633,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           return { ok: false, error: `Unknown tool ${name}` };
       }
     },
-    [addNotification, confirmPlan, latestStateRef, makePlan, pushLog, rejectPlan, revealPlan, undoAgent, undoStack.length],
+    [
+      addNotification,
+      confirmPlan,
+      latestStateRef,
+      makePlan,
+      pushLog,
+      readOnly,
+      rejectPlan,
+      revealPlan,
+      undoAgent,
+      undoStack.length,
+    ],
   );
 
   useWebMCPTools(runTool, setWebmcpNative);
@@ -561,7 +657,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       lastToolName,
       undoCount: undoStack.length,
       focus,
+      clearFocus,
       webmcpNative,
+      readOnly,
       player: AGENT_PLAYER,
       setRole,
       setWebmcpNative,
@@ -579,7 +677,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       lastToolName,
       undoStack.length,
       focus,
+      clearFocus,
       webmcpNative,
+      readOnly,
       setRole,
       confirmPlan,
       rejectPlan,

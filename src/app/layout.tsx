@@ -19,36 +19,42 @@ const dmSans = DM_Sans({
   weight: ['400', '500', '600', '700']
 });
 
+const SITE_TITLE = 'Second Mayor — IsoCity + WebMCP';
+const SITE_DESCRIPTION =
+  'Co-op isometric city builder: play IsoCity with an on-page AI partner via WebMCP. You stay in control; the agent inspects, ghosts plans, and waits for your approval.';
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://iso-city.com'),
   title: {
-    default: 'Second Mayor — IsoCity + WebMCP',
+    default: SITE_TITLE,
     template: 'Second Mayor — %s',
   },
-  description: 'Co-op isometric city builder: play IsoCity with an on-page AI partner via WebMCP. You stay in control; the agent inspects, ghosts plans, and waits for your approval.',
+  description: SITE_DESCRIPTION,
   openGraph: {
-    title: 'ISOCITY — Metropolis Builder',
-    description: 'A richly detailed isometric city builder. Build your metropolis and manage resources with cars, planes, helicopters, boats, trains, citizens, and more.',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
     type: 'website',
-    siteName: 'IsoCity',
+    siteName: 'Second Mayor',
     images: [
       {
         url: '/opengraph-image.png',
         width: 1179,
         height: 1406,
         type: 'image/png',
-        alt: 'ISOCITY - Isometric city builder game screenshot'
+        alt: 'Second Mayor - co-op isometric city builder screenshot'
       }
     ],
   },
   twitter: {
     card: 'summary_large_image',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
     images: ['/opengraph-image.png'],
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'IsoCity'
+    title: 'Second Mayor'
   },
   formatDetection: {
     telephone: false

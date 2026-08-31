@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAgent } from '@/context/AgentContext';
+import { useIsClient } from '@/hooks/useIsClient';
 
 const PRESETS: Array<{ name: string; args: Record<string, unknown> }> = [
   { name: 'get_city_state', args: {} },
+  { name: 'get_tool_catalog', args: {} },
   { name: 'get_problems', args: {} },
   { name: 'inspect_region', args: { x: 20, y: 20, radius: 5 } },
   { name: 'get_agent_status', args: {} },
@@ -19,20 +21,18 @@ const PRESETS: Array<{ name: string; args: Record<string, unknown> }> = [
 
 export function AgentInspector() {
   const agent = useAgent();
-  const [debug, setDebug] = useState(false);
+  const isClient = useIsClient();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('get_city_state');
   const [argsText, setArgsText] = useState('{}');
   const [result, setResult] = useState('');
   const names = useMemo(() => PRESETS.map((p) => p.name), []);
 
-  useEffect(() => {
-    setDebug(new URLSearchParams(window.location.search).get('debug') === '1');
-  }, []);
-
+  const debug =
+    isClient && new URLSearchParams(window.location.search).get('debug') === '1';
   if (!debug) return null;
 
-  const run = async () => {
+  const run = () => {
     let parsed: Record<string, unknown> = {};
     try {
       parsed = argsText.trim() ? JSON.parse(argsText) : {};

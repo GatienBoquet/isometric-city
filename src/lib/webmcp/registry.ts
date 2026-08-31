@@ -67,8 +67,17 @@ const fallback = new FallbackModelContext();
 
 function uniqueContexts(): ModelContextLike[] {
   const found: ModelContextLike[] = [fallback];
-  const native = typeof document !== 'undefined' ? document.modelContext : undefined;
-  if (native && native !== fallback) found.push(native);
+  if (typeof document === 'undefined') return found;
+
+  // The API has lived on both document and navigator across drafts, so register
+  // with whichever the browser actually exposes — missing one means the native
+  // agent sees no tools at all.
+  const candidates = [document.modelContext, navigator.modelContext];
+  for (const candidate of candidates) {
+    if (candidate && candidate !== fallback && !found.includes(candidate)) {
+      found.push(candidate);
+    }
+  }
   return found;
 }
 

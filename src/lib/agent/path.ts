@@ -2,9 +2,10 @@ import type { GameState, Tile } from '@/types/game';
 
 const PLACEABLE = new Set(['grass', 'tree', 'road', 'rail']);
 
-function walkable(tile: Tile | undefined, allowExistingRoad: boolean): boolean {
+/** Tiles a road/rail can be laid on, including track that is already there. */
+function walkable(tile: Tile | undefined): boolean {
   if (!tile) return false;
-  if (tile.building.type === 'road' || tile.building.type === 'bridge') return allowExistingRoad;
+  if (tile.building.type === 'road' || tile.building.type === 'bridge') return true;
   return PLACEABLE.has(tile.building.type);
 }
 
@@ -16,7 +17,7 @@ export function findBuildablePath(
 ): { x: number; y: number }[] | null {
   const { grid, gridSize } = state;
   if (!grid[start.y]?.[start.x] || !grid[end.y]?.[end.x]) return null;
-  if (!walkable(grid[start.y][start.x], true) || !walkable(grid[end.y][end.x], true)) {
+  if (!walkable(grid[start.y][start.x]) || !walkable(grid[end.y][end.x])) {
     return null;
   }
 
@@ -36,7 +37,10 @@ export function findBuildablePath(
 
   let head = 0;
   let found = false;
-  while (head < qx.length && qx.length < maxLength * 8) {
+  // BFS visits each tile at most once, so the grid itself is the bound. Capping
+  // the queue instead would abandon paths that are perfectly buildable on a
+  // large map.
+  while (head < qx.length) {
     const x = qx[head];
     const y = qy[head];
     head += 1;
@@ -50,7 +54,7 @@ export function findBuildablePath(
       if (nx < 0 || ny < 0 || nx >= gridSize || ny >= gridSize) continue;
       const idx = key(nx, ny);
       if (visited[idx]) continue;
-      if (!walkable(grid[ny][nx], true)) continue;
+      if (!walkable(grid[ny][nx])) continue;
       visited[idx] = 1;
       parent[idx] = key(x, y);
       qx.push(nx);

@@ -318,6 +318,31 @@ function SavedCityCard({ city, onLoad, onDelete }: { city: SavedCityMeta; onLoad
 
 const SAVED_CITY_PREFIX = 'isocity-city-';
 
+/**
+ * Copy whatever is in the autosave slot into the saved-cities list before we
+ * overwrite that slot with a new city. Starting a fresh game must never be the
+ * thing that loses a player's city.
+ */
+function archiveAutosavedCity(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const compressed = localStorage.getItem(STORAGE_KEY);
+    if (!compressed) return;
+
+    const json = decompressFromUTF16(compressed);
+    const state: GameState | null = json && json.startsWith('{') ? JSON.parse(json) : null;
+    if (!state?.grid || !state.stats) return;
+
+    const cityId = state.id || `city-${Date.now()}`;
+    // The autosave payload is already compressed in the same format, so it can
+    // be copied across without a round trip through the compressor.
+    localStorage.setItem(SAVED_CITY_PREFIX + cityId, compressed);
+    saveCityToIndex({ ...state, id: cityId });
+  } catch (e) {
+    console.error('Failed to archive current city', e);
+  }
+}
+
 export default function HomePage() {
   const [showGame, setShowGame] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
@@ -332,6 +357,10 @@ export default function HomePage() {
   const router = useRouter();
 
   const goPlay = (mode: 'new' | 'continue') => {
+    if (mode === 'new') {
+      // A fresh city takes over the autosave slot, so keep the old one.
+      archiveAutosavedCity();
+    }
     setLaunchMode(mode);
     router.push('/play');
   };
@@ -353,6 +382,7 @@ export default function HomePage() {
       }
       const play = params.get('play');
       if (play === 'new' || play === 'agent') {
+        archiveAutosavedCity();
         setLaunchMode('new');
         router.replace('/play');
         return;
@@ -363,6 +393,7 @@ export default function HomePage() {
             const response = await fetch('/example-states/example_state_9.json');
             const exampleState = await response.json();
             const compressed = compressToUTF16(JSON.stringify(exampleState));
+            archiveAutosavedCity();
             localStorage.setItem(STORAGE_KEY, compressed);
           } catch (e) {
             console.error('Failed to load example city', e);

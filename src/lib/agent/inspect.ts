@@ -88,13 +88,24 @@ export function inspectRegion(state: GameState, x: number, y: number, radius: nu
     rows.push(row);
   }
 
+  const TILE_DETAIL_LIMIT = 121;
+  const detailed = tiles.slice(0, TILE_DETAIL_LIMIT);
+
   return {
     origin: { x, y },
     radius: r,
     bounds: { minX, minY, maxX, maxY },
     ascii: rows.join('\n'),
-    tiles: tiles.slice(0, 121),
+    tiles: detailed,
     tileCount: tiles.length,
+    // `ascii` always covers the whole region; `tiles` is capped so a wide
+    // radius cannot blow up the payload. Say so rather than silently truncate.
+    tilesTruncated: detailed.length < tiles.length,
+    ...(detailed.length < tiles.length
+      ? {
+          note: `Per-tile JSON is limited to the first ${TILE_DETAIL_LIMIT} of ${tiles.length} tiles (read left-to-right, top-to-bottom). Use a smaller radius, or read the full region from ascii.`,
+        }
+      : {}),
   };
 }
 

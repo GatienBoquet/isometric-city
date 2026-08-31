@@ -78,15 +78,34 @@ const TOOLS: Array<{ name: string; description: string; inputSchema: JsonSchema 
     },
   },
   {
-    name: 'set_agent_role',
+    name: 'request_role',
     description:
-      'advisor = inspect/propose only (human must click Approve). co-builder = may call confirm_plan after proposing. Default advisor.',
+      'Ask the human to switch mode. Only they can change it: advisor = inspect/propose only (they click Approve); co-builder = you may call confirm_plan after proposing. Default advisor.',
     inputSchema: {
       type: 'object',
       properties: { role: { type: 'string', description: 'advisor | co-builder' } },
       required: ['role'],
       additionalProperties: false,
     },
+  },
+  {
+    // Kept registered under the old name so an agent that reaches for it gets
+    // the real answer — the human owns the mode — instead of "unknown tool".
+    name: 'set_agent_role',
+    description:
+      'Deprecated alias for request_role. The mode cannot be set by the agent; this only raises a request in the human HUD.',
+    inputSchema: {
+      type: 'object',
+      properties: { role: { type: 'string', description: 'advisor | co-builder' } },
+      required: ['role'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_tool_catalog',
+    description:
+      'Every tool name a plan may use, with its cost and tile footprint. Plans naming anything else are rejected.',
+    inputSchema: empty,
   },
   {
     name: 'add_agent_note',
@@ -202,7 +221,7 @@ const TOOLS: Array<{ name: string; description: string; inputSchema: JsonSchema 
   {
     name: 'confirm_plan',
     description:
-      'Commit the ghost plan. Only allowed in co-builder role. Otherwise the human must click Approve on the page.',
+      'Commit the ghost plan. Only works while the human has set co-builder mode; otherwise they must click Approve on the page.',
     inputSchema: empty,
   },
   { name: 'reject_plan', description: 'Discard the ghost plan without building.', inputSchema: empty },
@@ -215,9 +234,15 @@ const TOOLS: Array<{ name: string; description: string; inputSchema: JsonSchema 
 
 export function useWebMCPTools(run: Runner, onNative: (native: boolean) => void) {
   const runRef = useRef(run);
-  runRef.current = run;
   const onNativeRef = useRef(onNative);
-  onNativeRef.current = onNative;
+
+  // Keep the latest callbacks reachable from the tools registered once on mount.
+  // Assigned in an effect rather than during render so the React Compiler
+  // cannot drop the write.
+  useEffect(() => {
+    runRef.current = run;
+    onNativeRef.current = onNative;
+  });
 
   useEffect(() => {
     const { native } = installWebmcpPolyfill();

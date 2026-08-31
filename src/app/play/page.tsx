@@ -1,30 +1,29 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
 import { GameProvider } from '@/context/GameContext';
 import { MultiplayerContextProvider } from '@/context/MultiplayerContext';
 import Game from '@/components/Game';
 import { takeLaunchMode } from '@/lib/launchGame';
+import { useIsClient } from '@/hooks/useIsClient';
 import { T } from 'gt-next';
 
 export default function PlayPage() {
   const router = useRouter();
-  const [fresh, setFresh] = useState(false);
-  const [ready, setReady] = useState(false);
+  const isClient = useIsClient();
 
-  useEffect(() => {
-    setFresh(takeLaunchMode() === 'new');
-    setReady(true);
-  }, []);
-
-  if (!ready) {
+  if (!isClient) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
         <div className="text-white/60"><T>Loading...</T></div>
       </main>
     );
   }
+
+  // Idempotent: the first call consumes the sessionStorage flag and caches it,
+  // so re-renders keep resolving to the same mode.
+  const fresh = takeLaunchMode() === 'new';
 
   return (
     <MultiplayerContextProvider>

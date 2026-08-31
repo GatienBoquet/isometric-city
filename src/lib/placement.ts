@@ -14,7 +14,7 @@ import {
   placeWaterTerraform,
 } from '@/lib/simulation';
 
-const toolBuildingMap: Partial<Record<Tool, BuildingType>> = {
+export const toolBuildingMap: Partial<Record<Tool, BuildingType>> = {
   road: 'road',
   rail: 'rail',
   rail_station: 'rail_station',
@@ -36,6 +36,7 @@ const toolBuildingMap: Partial<Record<Tool, BuildingType>> = {
   space_program: 'space_program',
   city_hall: 'city_hall',
   amusement_park: 'amusement_park',
+  // New parks
   basketball_courts: 'basketball_courts',
   playground_small: 'playground_small',
   playground_large: 'playground_large',
@@ -65,22 +66,43 @@ const toolBuildingMap: Partial<Record<Tool, BuildingType>> = {
   mountain_trailhead: 'mountain_trailhead',
 };
 
-const toolZoneMap: Partial<Record<Tool, ZoneType>> = {
+export const toolZoneMap: Partial<Record<Tool, ZoneType>> = {
   zone_residential: 'residential',
   zone_commercial: 'commercial',
   zone_industrial: 'industrial',
   zone_dezone: 'none',
 };
 
+/** Tools that place something on a single tile. Excludes camera/grid tools. */
+export const PLACEABLE_TOOLS: Tool[] = [
+  'bulldoze',
+  'subway',
+  'zone_water',
+  'zone_land',
+  ...(Object.keys(toolBuildingMap) as Tool[]),
+  ...(Object.keys(toolZoneMap) as Tool[]),
+];
+
+export function isPlaceableTool(value: unknown): value is Tool {
+  return typeof value === 'string' && PLACEABLE_TOOLS.includes(value as Tool);
+}
+
+/**
+ * Apply one tool to one tile. Pure: returns the same state object when nothing
+ * changed. Shared by the human tool (GameContext.placeAtTile) and the agent so
+ * the two paths cannot drift apart.
+ */
 export function applyToolAtTile(state: GameState, x: number, y: number, tool: Tool): GameState {
   if (tool === 'select') return state;
 
   const info = TOOL_INFO[tool];
   const cost = info?.cost ?? 0;
   const tile = state.grid[y]?.[x];
+
   if (!tile) return state;
   if (cost > 0 && state.stats.money < cost) return state;
 
+  // Prevent wasted spend if nothing would change
   if (tool === 'bulldoze' && tile.building.type === 'grass' && tile.zone === 'none') {
     return state;
   }
@@ -91,11 +113,14 @@ export function applyToolAtTile(state: GameState, x: number, y: number, tool: To
   if (zone && tile.zone === zone) return state;
   if (building && tile.building.type === building) return state;
 
+  // Subway is placed underground, leaving the surface building alone
   if (tool === 'subway') {
     if (tile.building.type === 'water') return state;
     if (tile.hasSubway) return state;
+
     const nextState = placeSubway(state, x, y);
     if (nextState === state) return state;
+
     return {
       ...nextState,
       stats: { ...nextState.stats, money: nextState.stats.money - cost },
@@ -103,9 +128,12 @@ export function applyToolAtTile(state: GameState, x: number, y: number, tool: To
   }
 
   if (tool === 'zone_water') {
+    // Already water, or a bridge that terraforming would break
     if (tile.building.type === 'water' || tile.building.type === 'bridge') return state;
+
     const nextState = placeWaterTerraform(state, x, y);
     if (nextState === state) return state;
+
     return {
       ...nextState,
       stats: { ...nextState.stats, money: nextState.stats.money - cost },
@@ -113,9 +141,12 @@ export function applyToolAtTile(state: GameState, x: number, y: number, tool: To
   }
 
   if (tool === 'zone_land') {
+    // Only works on water
     if (tile.building.type !== 'water') return state;
+
     const nextState = placeLandTerraform(state, x, y);
     if (nextState === state) return state;
+
     return {
       ...nextState,
       stats: { ...nextState.stats, money: nextState.stats.money - cost },
@@ -123,6 +154,7 @@ export function applyToolAtTile(state: GameState, x: number, y: number, tool: To
   }
 
   let nextState: GameState;
+
   if (tool === 'bulldoze') {
     nextState = bulldozeTile(state, x, y);
   } else if (zone) {
@@ -134,12 +166,14 @@ export function applyToolAtTile(state: GameState, x: number, y: number, tool: To
   }
 
   if (nextState === state) return state;
+
   if (cost > 0) {
     nextState = {
       ...nextState,
       stats: { ...nextState.stats, money: nextState.stats.money - cost },
     };
   }
+
   return nextState;
 }
 
@@ -150,19 +184,61 @@ export function cloneTile(tile: Tile): Tile {
   };
 }
 
-/** Origin plus multi-tile footprint (hospital 2x2, university 3x3, ...). */
-export function tilesAffectedByPlacement(
-  state: GameState,
-  placement: { x: number; y: number; tool: Tool },
-): { x: number; y: number }[] {
-  const size = Math.max(1, TOOL_INFO[placement.tool]?.size ?? 1);
-  const cells: { x: number; y: number }[] = [];
-  for (let dy = 0; dy < size; dy++) {
-    for (let dx = 0; dx < size; dx++) {
-      const x = placement.x + dx;
-      const y = placement.y + dy;
-      if (state.grid[y]?.[x]) cells.push({ x, y });
+/**
+ * Tiles are flat records of primitives (plus a flat `building`), so comparing
+ * own keys is an exact equality test.
+ */
+function tileEquals(a: Tile, b: Tile): boolean {
+  if (a === b) return true;
+
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+
+  for (const key of aKeys) {
+    if (key === 'building') continue;
+    if (a[key as keyof Tile] !== b[key as keyof Tile]) return false;
+  }
+
+  const aBuilding = a.building as unknown as Record<string, unknown>;
+  const bBuilding = b.building as unknown as Record<string, unknown>;
+  const aBuildingKeys = Object.keys(aBuilding);
+  if (aBuildingKeys.length !== Object.keys(bBuilding).length) return false;
+  for (const key of aBuildingKeys) {
+    if (aBuilding[key] !== bBuilding[key]) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Snapshot every tile that actually differs between two grids.
+ *
+ * Placement helpers reach well past the tile they are handed — bulldozing one
+ * tile of a 3x3 university clears all nine, bulldozing a bridge tile removes
+ * the whole span — so the undo record is built by diffing rather than by
+ * predicting a footprint from TOOL_INFO.
+ */
+export function diffChangedTiles(
+  before: Tile[][],
+  after: Tile[][],
+): { x: number; y: number; tile: Tile }[] {
+  const changed: { x: number; y: number; tile: Tile }[] = [];
+
+  for (let y = 0; y < before.length; y++) {
+    const beforeRow = before[y];
+    const afterRow = after[y];
+    if (!afterRow) break;
+    if (beforeRow === afterRow) continue;
+
+    for (let x = 0; x < beforeRow.length; x++) {
+      const beforeTile = beforeRow[x];
+      const afterTile = afterRow[x];
+      if (!beforeTile || !afterTile) continue;
+      if (tileEquals(beforeTile, afterTile)) continue;
+      changed.push({ x, y, tile: cloneTile(beforeTile) });
     }
   }
-  return cells;
+
+  return changed;
 }
