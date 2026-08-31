@@ -188,7 +188,7 @@ export function cloneTile(tile: Tile): Tile {
  * Tiles are flat records of primitives (plus a flat `building`), so comparing
  * own keys is an exact equality test.
  */
-function tileEquals(a: Tile, b: Tile): boolean {
+export function tileEquals(a: Tile, b: Tile): boolean {
   if (a === b) return true;
 
   const aKeys = Object.keys(a);
@@ -222,8 +222,8 @@ function tileEquals(a: Tile, b: Tile): boolean {
 export function diffChangedTiles(
   before: Tile[][],
   after: Tile[][],
-): { x: number; y: number; tile: Tile }[] {
-  const changed: { x: number; y: number; tile: Tile }[] = [];
+): { x: number; y: number; before: Tile; after: Tile }[] {
+  const changed: { x: number; y: number; before: Tile; after: Tile }[] = [];
 
   for (let y = 0; y < before.length; y++) {
     const beforeRow = before[y];
@@ -236,7 +236,7 @@ export function diffChangedTiles(
       const afterTile = afterRow[x];
       if (!beforeTile || !afterTile) continue;
       if (tileEquals(beforeTile, afterTile)) continue;
-      changed.push({ x, y, tile: cloneTile(beforeTile) });
+      changed.push({ x, y, before: cloneTile(beforeTile), after: cloneTile(afterTile) });
     }
   }
 

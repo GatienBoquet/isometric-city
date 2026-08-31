@@ -31,7 +31,14 @@ export interface PendingPlan {
 export interface TileSnapshot {
   x: number;
   y: number;
-  tile: Tile;
+  /** The tile as it was before the plan was applied. */
+  before: Tile;
+  /**
+   * The tile the plan left behind. Undo restores `before` only while the tile
+   * still looks like this, so it cannot overwrite something the human built
+   * on top afterwards.
+   */
+  after: Tile;
 }
 
 export interface UndoRecord {

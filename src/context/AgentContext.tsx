@@ -4,6 +4,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -13,9 +14,15 @@ import { useGame } from '@/context/GameContext';
 import { useMultiplayerOptional } from '@/context/MultiplayerContext';
 import { Budget, GameState, TOOL_INFO, Tool } from '@/types/game';
 import { createBridgesOnPath } from '@/lib/simulation';
-import { applyToolAtTile, cloneTile, diffChangedTiles, isPlaceableTool } from '@/lib/placement';
+import {
+  applyToolAtTile,
+  cloneTile,
+  diffChangedTiles,
+  isPlaceableTool,
+  tileEquals,
+} from '@/lib/placement';
 import { findProblems, inspectRegion, summarizeCity } from '@/lib/agent/inspect';
-import { findBuildablePath, tilesInRect } from '@/lib/agent/path';
+import { findBuildablePath, tilesInRect, tilesInRectCapped } from '@/lib/agent/path';
 import {
   AGENT_PLAYER,
   AgentHighlight,
@@ -54,6 +61,9 @@ interface AgentContextValue {
 }
 
 const AgentContext = createContext<AgentContextValue | null>(null);
+
+/** How long the green "built" markers stay on the map after a plan lands. */
+const BUILT_HIGHLIGHT_MS = 6000;
 
 const READ_ONLY_REASON =
   'Second Mayor is advisory only during co-op: agent builds are not sent to the other player, so they would desync the city. Leave the room to build together with the agent.';
@@ -102,6 +112,33 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   // cannot memoize the write away.
   const roleRef = useRef<AgentRole>('advisor');
   const pendingRef = useRef<PendingPlan | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Replace the map markers, optionally letting them fade on their own. The
+   * "built" markers from an applied plan would otherwise sit on the map for
+   * the rest of the session.
+   */
+  const showHighlights = useCallback((marks: AgentHighlight[], ttlMs?: number) => {
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = null;
+    }
+    setHighlights(marks);
+    if (ttlMs && marks.length) {
+      highlightTimerRef.current = setTimeout(() => {
+        highlightTimerRef.current = null;
+        setHighlights((prev) => (prev === marks ? [] : prev));
+      }, ttlMs);
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    },
+    [],
+  );
 
   const pushLog = useCallback((kind: AgentLogKind, text: string) => {
     setLog((prev) => {
@@ -130,12 +167,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       pushLog('proposed', plan.title);
       flushSync(() => {
         setPendingPlan(plan);
-        setHighlights(marks);
+        showHighlights(marks);
         setLastError(null);
         if (focusTile) setFocus(focusTile);
       });
     },
-    [pushLog],
+    [pushLog, showHighlights],
   );
 
   const setRole = useCallback((next: AgentRole) => {
@@ -183,6 +220,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     let appliedCount = 0;
     let policyChanged = false;
+    let unaffordable = 0;
     mutateGameState((prev) => {
       let next: GameState = prev;
       if (plan.taxRate !== undefined && plan.taxRate !== prev.taxRate) {
@@ -208,12 +246,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // drag hands to finishTrackDrag.
       const trackTiles: { x: number; y: number }[] = [];
       appliedCount = 0;
+      unaffordable = 0;
       for (const placement of plan.placements) {
         if (placement.tool === 'road' || placement.tool === 'rail') {
           trackTiles.push({ x: placement.x, y: placement.y });
         }
+        const cost = TOOL_INFO[placement.tool]?.cost ?? 0;
         const attempt = applyToolAtTile(next, placement.x, placement.y, placement.tool);
-        if (attempt === next) continue;
+        if (attempt === next) {
+          // Distinguish "ran out of money" from "the tile refused the tool", so
+          // the agent is told which one it hit.
+          if (cost > 0 && next.stats.money < cost) unaffordable += 1;
+          continue;
+        }
         appliedCount += 1;
         next = attempt;
       }
@@ -228,11 +273,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (appliedCount === 0 && !policyChanged && plan.placements.length > 0) {
-      const error =
-        'Nothing could be built there (blocked tiles, water, or existing buildings). Reject and pick empty lots.';
+      const error = unaffordable
+        ? `Not enough money for this plan (${unaffordable} of ${plan.placements.length} tiles unaffordable). Propose something cheaper.`
+        : 'Nothing could be built there (blocked tiles, water, or existing buildings). Reject and pick empty lots.';
       setLastError(error);
       addNotification('Second Mayor', error, '⚠️');
-      return { ok: false, error, attempted: plan.placements.length };
+      return { ok: false, error, attempted: plan.placements.length, unaffordable };
     }
 
     const after = latestStateRef.current;
@@ -257,8 +303,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setUndoStack((stack) => [...stack.slice(-19), undo]);
       setPendingPlan(null);
       setLastError(null);
-      setHighlights(
+      showHighlights(
         plan.placements.map((p) => ({ x: p.x, y: p.y, kind: 'ok' as const, label: 'built' })),
+        BUILT_HIGHLIGHT_MS,
       );
     });
     addNotification('Second Mayor', appliedNote, '🤝');
@@ -271,8 +318,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       moneySpent: moneyBefore - after.stats.money,
       money: after.stats.money,
       placements: plan.placements.length,
+      ...(unaffordable
+        ? {
+            unaffordable,
+            note: `${unaffordable} tile${unaffordable === 1 ? '' : 's'} skipped for lack of funds.`,
+          }
+        : {}),
     };
-  }, [addNotification, latestStateRef, mutateGameState, pushLog, readOnly]);
+  }, [addNotification, latestStateRef, mutateGameState, pushLog, readOnly, showHighlights]);
 
   const undoAgent = useCallback(() => {
     const record = undoStack[undoStack.length - 1];
@@ -282,11 +335,24 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: READ_ONLY_REASON, readOnly: true };
     }
 
+    // Only revert tiles that still look the way the plan left them. Anything
+    // the human has changed since is theirs, and undoing the agent must not
+    // take it away.
+    let restored = 0;
+    let keptForHuman = 0;
     mutateGameState((prev) => {
       const newGrid = prev.grid.map((row) => row.slice());
+      restored = 0;
+      keptForHuman = 0;
       for (const snap of record.tiles) {
-        if (!newGrid[snap.y]?.[snap.x]) continue;
-        newGrid[snap.y][snap.x] = cloneTile(snap.tile);
+        const current = newGrid[snap.y]?.[snap.x];
+        if (!current) continue;
+        if (!tileEquals(current, snap.after)) {
+          keptForHuman += 1;
+          continue;
+        }
+        newGrid[snap.y][snap.x] = cloneTile(snap.before);
+        restored += 1;
       }
       let next: GameState = { ...prev, grid: newGrid };
       if (record.moneySpent) {
@@ -316,12 +382,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     flushSync(() => {
       setUndoStack((stack) => stack.slice(0, -1));
     });
-    pushLog('undone', `Undid: ${record.description}`);
-    addNotification('Second Mayor', `Undid: ${record.description}`, '↩️');
+
+    const keptNote = keptForHuman
+      ? ` (left ${keptForHuman} tile${keptForHuman === 1 ? '' : 's'} you changed since)`
+      : '';
+    pushLog('undone', `Undid: ${record.description}${keptNote}`);
+    addNotification('Second Mayor', `Undid: ${record.description}${keptNote}`, '↩️');
     return {
       ok: true,
       undone: record.description,
-      tilesRestored: record.tiles.length,
+      tilesRestored: restored,
+      tilesKeptForHuman: keptForHuman,
+      ...(keptForHuman
+        ? { note: 'Tiles the human changed after the plan were left alone.' }
+        : {}),
       remaining: undoStack.length - 1,
     };
   }, [addNotification, mutateGameState, pushLog, readOnly, undoStack]);
@@ -374,7 +448,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
               label: 'fire',
             })),
           ];
-          setHighlights(marks);
+          showHighlights(marks);
           if (marks[0]) setFocus({ x: marks[0].x, y: marks[0].y });
           return { ok: true, ...problems, highlighted: marks.length };
         }
@@ -408,12 +482,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
               };
             })
             .filter((h) => state.grid[h.y]?.[h.x]);
-          setHighlights(next);
+          showHighlights(next);
           if (next[0]) setFocus({ x: next[0].x, y: next[0].y });
           return { ok: true, count: next.length };
         }
         case 'clear_highlights':
-          setHighlights([]);
+          showHighlights([]);
           return { ok: true };
         case 'focus_tile': {
           const x = clampInt(input.x, 0);
@@ -461,13 +535,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             return { ok: false, error: `zone must be one of: ${allowed.join(' | ')}` };
           }
           const zoneTool = requested as Tool;
-          const tiles = tilesInRect(
+          const { tiles, truncated } = tilesInRectCapped(
             clampInt(input.x1, 0),
             clampInt(input.y1, 0),
             clampInt(input.x2, 0),
             clampInt(input.y2, 0),
             state.gridSize,
-          ).slice(0, MAX_PLAN_TILES);
+            MAX_PLAN_TILES,
+          );
           if (tiles.length === 0) return { ok: false, error: 'Empty region.' };
           const plan = makePlan({
             title: `Zone ${tiles.length} tiles as ${zoneTool.replace('zone_', '')}`,
@@ -480,7 +555,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             plan.placements.map((p) => ({ x: p.x, y: p.y, kind: 'ghost', label: zoneTool })),
             plan.placements[0],
           );
-          return { ok: true, needsConfirmation: true, plan };
+          return {
+            ok: true,
+            needsConfirmation: true,
+            plan,
+            ...(truncated
+              ? {
+                  truncated: true,
+                  note: `Region trimmed to ${tiles.length} whole rows (plans are capped at ${MAX_PLAN_TILES} tiles). Propose the rest as a second plan.`,
+                }
+              : {}),
+          };
         }
         case 'propose_road_path': {
           const start = { x: clampInt(input.x1, 0), y: clampInt(input.y1, 0) };
@@ -646,6 +731,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       readOnly,
       rejectPlan,
       revealPlan,
+      showHighlights,
       undoAgent,
       undoStack.length,
     ],

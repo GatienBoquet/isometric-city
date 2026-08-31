@@ -21,6 +21,9 @@ const COLORS: Record<string, { fill: string; stroke: string }> = {
 export function AgentOverlayCanvas({ viewport }: { viewport: Viewport | null }) {
   const agent = useAgentOptional();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Depend on the marker list, not the whole context value, so unrelated agent
+  // state (the action log, the last tool name) does not force a repaint.
+  const highlights = agent?.highlights;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -37,13 +40,13 @@ export function AgentOverlayCanvas({ viewport }: { viewport: Viewport | null }) 
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!agent || agent.highlights.length === 0) return;
+    if (!highlights || highlights.length === 0) return;
 
     ctx.scale(dpr, dpr);
     ctx.translate(viewport.offset.x, viewport.offset.y);
     ctx.scale(viewport.zoom, viewport.zoom);
 
-    for (const mark of agent.highlights) {
+    for (const mark of highlights) {
       const { screenX, screenY } = gridToScreen(mark.x, mark.y, 0, 0);
       const palette = COLORS[mark.kind] || COLORS.focus;
       const w = TILE_WIDTH;
@@ -60,7 +63,7 @@ export function AgentOverlayCanvas({ viewport }: { viewport: Viewport | null }) 
       ctx.lineWidth = 2 / viewport.zoom;
       ctx.stroke();
     }
-  }, [agent, agent?.highlights, viewport]);
+  }, [highlights, viewport]);
 
   return (
     <canvas

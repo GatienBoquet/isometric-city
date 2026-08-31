@@ -323,23 +323,28 @@ const SAVED_CITY_PREFIX = 'isocity-city-';
  * overwrite that slot with a new city. Starting a fresh game must never be the
  * thing that loses a player's city.
  */
-function archiveAutosavedCity(): void {
-  if (typeof window === 'undefined') return;
+function archiveAutosavedCity(): boolean {
+  if (typeof window === 'undefined') return true;
   try {
     const compressed = localStorage.getItem(STORAGE_KEY);
-    if (!compressed) return;
+    if (!compressed) return true;
 
     const json = decompressFromUTF16(compressed);
     const state: GameState | null = json && json.startsWith('{') ? JSON.parse(json) : null;
-    if (!state?.grid || !state.stats) return;
+    if (!state?.grid || !state.stats) return true;
 
     const cityId = state.id || `city-${Date.now()}`;
     // The autosave payload is already compressed in the same format, so it can
     // be copied across without a round trip through the compressor.
     localStorage.setItem(SAVED_CITY_PREFIX + cityId, compressed);
     saveCityToIndex({ ...state, id: cityId });
+    return true;
   } catch (e) {
+    // Most likely the storage quota: archiving briefly doubles the city's
+    // footprint. Report it so the caller can stop rather than start a new city
+    // over the top of one it could not save.
     console.error('Failed to archive current city', e);
+    return false;
   }
 }
 
@@ -357,9 +362,13 @@ export default function HomePage() {
   const router = useRouter();
 
   const goPlay = (mode: 'new' | 'continue') => {
-    if (mode === 'new') {
-      // A fresh city takes over the autosave slot, so keep the old one.
-      archiveAutosavedCity();
+    if (mode === 'new' && !archiveAutosavedCity()) {
+      // Losing the city is the one outcome archiving exists to prevent, so this
+      // is the human's call, not ours.
+      const proceed = window.confirm(
+        'Your current city could not be saved (browser storage is full). Starting a new city will replace it. Continue anyway?',
+      );
+      if (!proceed) return;
     }
     setLaunchMode(mode);
     router.push('/play');

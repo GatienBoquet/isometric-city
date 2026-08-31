@@ -9,6 +9,40 @@ function walkable(tile: Tile | undefined): boolean {
   return PLACEABLE.has(tile.building.type);
 }
 
+/** Mirrors MAX_BRIDGE_SPAN in simulation.ts — a wider gap gets no bridge. */
+const MAX_WATER_CROSSING = 10;
+
+/**
+ * From (x,y), walk in one direction over water and report the far bank if the
+ * run is short enough to be bridged.
+ */
+function scanCrossing(
+  grid: Tile[][],
+  gridSize: number,
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+): { water: { x: number; y: number }[]; far: { x: number; y: number } } | null {
+  const water: { x: number; y: number }[] = [];
+  let cx = x + dx;
+  let cy = y + dy;
+
+  while (cx >= 0 && cy >= 0 && cx < gridSize && cy < gridSize) {
+    const tile = grid[cy][cx];
+    if (tile.building.type === 'water') {
+      water.push({ x: cx, y: cy });
+      if (water.length > MAX_WATER_CROSSING) return null;
+      cx += dx;
+      cy += dy;
+      continue;
+    }
+    if (!water.length || !walkable(tile)) return null;
+    return { water, far: { x: cx, y: cy } };
+  }
+  return null;
+}
+
 export function findBuildablePath(
   state: GameState,
   start: { x: number; y: number },
@@ -54,6 +88,30 @@ export function findBuildablePath(
       if (nx < 0 || ny < 0 || nx >= gridSize || ny >= gridSize) continue;
       const idx = key(nx, ny);
       if (visited[idx]) continue;
+
+      if (grid[ny][nx].building.type === 'water') {
+        // Straight runs of water are bridgeable, so step over them and keep the
+        // water tiles in the path: createBridgesOnPath needs to see them to
+        // recognise the crossing. Anything longer than a bridge span is not a
+        // route.
+        const crossing = scanCrossing(grid, gridSize, x, y, dx, dy);
+        if (!crossing) continue;
+
+        let from = key(x, y);
+        for (const water of crossing.water) {
+          const wIdx = key(water.x, water.y);
+          visited[wIdx] = 1;
+          parent[wIdx] = from;
+          from = wIdx;
+        }
+        const farIdx = key(crossing.far.x, crossing.far.y);
+        visited[farIdx] = 1;
+        parent[farIdx] = from;
+        qx.push(crossing.far.x);
+        qy.push(crossing.far.y);
+        continue;
+      }
+
       if (!walkable(grid[ny][nx])) continue;
       visited[idx] = 1;
       parent[idx] = key(x, y);
@@ -77,6 +135,36 @@ export function findBuildablePath(
   }
   path.reverse();
   return path;
+}
+
+/**
+ * Clamp a rectangle to a whole number of rows that fits within `maxTiles`, so a
+ * capped plan never ends mid-row and leaves a ragged edge.
+ */
+export function tilesInRectCapped(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  gridSize: number,
+  maxTiles: number,
+): { tiles: { x: number; y: number }[]; truncated: boolean } {
+  const minX = Math.max(0, Math.min(x1, x2));
+  const maxX = Math.min(gridSize - 1, Math.max(x1, x2));
+  const minY = Math.max(0, Math.min(y1, y2));
+  const maxY = Math.min(gridSize - 1, Math.max(y1, y2));
+  if (minX > maxX || minY > maxY) return { tiles: [], truncated: false };
+
+  const width = maxX - minX + 1;
+  const fullRows = maxY - minY + 1;
+  const rows = Math.max(1, Math.min(fullRows, Math.floor(maxTiles / width)));
+  const tiles = tilesInRect(minX, minY, maxX, minY + rows - 1, gridSize);
+
+  // A single row wider than the cap still has to be trimmed.
+  if (tiles.length > maxTiles) {
+    return { tiles: tiles.slice(0, maxTiles), truncated: true };
+  }
+  return { tiles, truncated: rows < fullRows };
 }
 
 export function tilesInRect(
