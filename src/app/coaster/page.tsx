@@ -292,12 +292,18 @@ function CoasterPageContent() {
   }, []);
 
   useEffect(() => {
-    refreshSavedParks();
+    // Deferred so the mount-time reads do not set state synchronously and
+    // cascade a second render of the landing page.
+    const timer = window.setTimeout(() => {
+      refreshSavedParks();
+    }, 0);
     const params = new URLSearchParams(window.location.search);
     const roomCode = params.get('room');
     if (roomCode && roomCode.length === 5) {
+      window.clearTimeout(timer);
       window.location.replace(`/coaster/coop/${roomCode.toUpperCase()}`);
     }
+    return () => window.clearTimeout(timer);
   }, [refreshSavedParks]);
 
   const handleExitGame = () => {

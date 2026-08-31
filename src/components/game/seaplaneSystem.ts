@@ -210,6 +210,12 @@ export function useSeaplaneSystem(
       // Update contrail particles when at altitude
       const contrailMaxAge = isMobile ? 0.8 : CONTRAIL_MAX_AGE;
       const contrailSpawnInterval = isMobile ? 0.06 : CONTRAIL_SPAWN_INTERVAL;
+      // These are the per-frame simulation objects, mutated in place by design.
+      // The ref that owns them lives in CanvasIsometricGrid, which also resets
+      // and draws them, so the compiler sees a hook argument being written.
+      // Cloning every particle each frame is exactly what this hot loop avoids;
+      // clearing the rule means moving ref ownership into these hooks.
+      // eslint-disable-next-line react-hooks/immutability
       seaplane.contrail = seaplane.contrail
         .map(p => ({ ...p, age: p.age + delta, opacity: Math.max(0, 1 - p.age / contrailMaxAge) }))
         .filter(p => p.age < contrailMaxAge);

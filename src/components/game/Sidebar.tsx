@@ -473,12 +473,14 @@ export const Sidebar = React.memo(function Sidebar({ onExit }: { onExit?: () => 
   
   // Auto-show share modal when first connecting as host (not guest)
   // Guests have initialState set (received from host), hosts don't
+  // Queued rather than set synchronously so becoming host does not cascade a
+  // second render of the whole sidebar.
   useEffect(() => {
     const isHost = multiplayer?.connectionState === 'connected' && multiplayer?.roomCode && !multiplayer?.initialState;
-    if (isHost && !hasShownShareModalRef.current) {
-      hasShownShareModalRef.current = true;
-      setShowShareModal(true);
-    }
+    if (!isHost || hasShownShareModalRef.current) return;
+    hasShownShareModalRef.current = true;
+    const timer = setTimeout(() => setShowShareModal(true), 0);
+    return () => clearTimeout(timer);
   }, [multiplayer?.connectionState, multiplayer?.roomCode, multiplayer?.initialState]);
   const m = useMessages();
   

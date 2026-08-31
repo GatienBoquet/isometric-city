@@ -654,6 +654,11 @@ export function GameProvider({ children, startFresh = false }: { children: React
   // PERF: Just mark that state has changed - defer expensive deep copy to actual save time
   const stateChangedRef = useRef(false);
   const latestStateRef = useRef(state);
+  // The live state the canvas, the simulation tick and mutateGameState all read
+  // from. It has to track `state` within the same commit — deferring the write
+  // to an effect lets a tick that has already advanced the ref be rolled back
+  // to the state this render captured, losing a tick of simulation.
+  // eslint-disable-next-line react-hooks/refs
   latestStateRef.current = state;
   
   useEffect(() => {
