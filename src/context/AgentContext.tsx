@@ -202,16 +202,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         };
         policyChanged = true;
       }
+      // Track tiles are collected whether or not the placement landed: a road
+      // cannot be laid on water, and createBridgesOnPath needs those failed
+      // water tiles to see that the run crosses a river. Same list the human
+      // drag hands to finishTrackDrag.
       const trackTiles: { x: number; y: number }[] = [];
       appliedCount = 0;
       for (const placement of plan.placements) {
+        if (placement.tool === 'road' || placement.tool === 'rail') {
+          trackTiles.push({ x: placement.x, y: placement.y });
+        }
         const attempt = applyToolAtTile(next, placement.x, placement.y, placement.tool);
         if (attempt === next) continue;
         appliedCount += 1;
         next = attempt;
-        if (placement.tool === 'road' || placement.tool === 'rail') {
-          trackTiles.push({ x: placement.x, y: placement.y });
-        }
       }
       if (trackTiles.length > 1) {
         next = createBridgesOnPath(
