@@ -104,7 +104,7 @@ const TOOLS: Array<{ name: string; description: string; inputSchema: JsonSchema 
   {
     name: 'get_tool_catalog',
     description:
-      'Every tool name a plan may use, with its cost and tile footprint. Plans naming anything else are rejected.',
+      'Every tool name a plan may use, with its cost and tile footprint, plus the maximum number of tiles one plan may hold. Plans naming anything else are rejected.',
     inputSchema: empty,
   },
   {
@@ -154,7 +154,8 @@ const TOOLS: Array<{ name: string; description: string; inputSchema: JsonSchema 
   },
   {
     name: 'propose_placements',
-    description: 'Ghost a batch of tile tools (road, park, tree, ...). Does not commit.',
+    description:
+      'Ghost a batch of tile tools (road, park, tree, ...). Does not commit. A plan holds at most 200 tiles (get_tool_catalog reports the cap); anything beyond that is dropped and reported, so send a long build as several plans.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -221,14 +222,27 @@ const TOOLS: Array<{ name: string; description: string; inputSchema: JsonSchema 
   {
     name: 'confirm_plan',
     description:
-      'Commit the ghost plan. Only works while the human has set co-builder mode; otherwise they must click Approve on the page.',
-    inputSchema: empty,
+      'Commit the ghost plan. Only works while the human has set co-builder mode; otherwise they must click Approve on the page. Pass the planId from the proposal to make the call safe to retry: a plan that was already applied reports its original result instead of failing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        planId: { type: 'string', description: 'id from the proposal, so a retry is idempotent' },
+      },
+      additionalProperties: false,
+    },
   },
   { name: 'reject_plan', description: 'Discard the ghost plan without building.', inputSchema: empty },
   {
     name: 'undo_agent_actions',
-    description: 'Undo the last committed Second Mayor plan. Does not undo the human player.',
-    inputSchema: empty,
+    description:
+      'Undo the last committed Second Mayor plan. Does not undo the human player, and leaves alone any tile they changed since. Pass the undoId from the confirm result to name which plan you mean: without it a repeated call walks further back down the stack.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        undoId: { type: 'string', description: 'id from the confirm result, so a retry is idempotent' },
+      },
+      additionalProperties: false,
+    },
   },
 ];
 

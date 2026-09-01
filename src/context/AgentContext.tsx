@@ -52,9 +52,9 @@ interface AgentContextValue {
   player: typeof AGENT_PLAYER;
   setRole: (role: AgentRole) => { ok: boolean; role: AgentRole };
   setWebmcpNative: (native: boolean) => void;
-  confirmPlan: (plan?: PendingPlan | null) => Json;
+  confirmPlan: (plan?: PendingPlan | null, planId?: string) => Json;
   rejectPlan: () => Json;
-  undoAgent: () => Json;
+  undoAgent: (undoId?: string) => Json;
   runTool: (name: string, input: Json) => Json;
   lastError: string | null;
   log: AgentLogEntry[];
@@ -112,6 +112,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   // cannot memoize the write away.
   const roleRef = useRef<AgentRole>('advisor');
   const pendingRef = useRef<PendingPlan | null>(null);
+  /**
+   * Results of plans already committed, keyed by plan id. A WebMCP bridge can
+   * deliver the same call more than once (a retry, or a page registered with
+   * two contexts over one registry); without this, the second confirm_plan
+   * finds no pending plan and reports failure for a build that succeeded.
+   */
+  const appliedPlansRef = useRef(new Map<string, Json>());
+  /** Undo records already consumed, so a repeated call cannot cascade undos. */
+  const undoneIdsRef = useRef(new Set<string>());
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
@@ -201,12 +210,24 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, rejected: title };
   }, [pushLog]);
 
-  const confirmPlan = useCallback((explicit?: PendingPlan | null) => {
+  const confirmPlan = useCallback((explicit?: PendingPlan | null, planId?: string) => {
+    if (planId) {
+      const already = appliedPlansRef.current.get(planId);
+      if (already) return { ...already, alreadyApplied: true };
+    }
+
     const plan = explicit ?? pendingRef.current;
     if (!plan) {
-      const error = 'No pending plan. Propose something first.';
+      const lastApplied = [...appliedPlansRef.current.values()].pop();
+      const error = lastApplied
+        ? 'No pending plan. The most recent plan was already applied — check `lastApplied` before proposing it again.'
+        : 'No pending plan. Propose something first.';
       setLastError(error);
-      return { ok: false, error };
+      return { ok: false, error, ...(lastApplied ? { lastApplied } : {}) };
+    }
+
+    if (appliedPlansRef.current.has(plan.id)) {
+      return { ...appliedPlansRef.current.get(plan.id)!, alreadyApplied: true };
     }
 
     if (readOnly) {
@@ -310,9 +331,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
     addNotification('Second Mayor', appliedNote, '🤝');
 
-    return {
+    const result: Json = {
       ok: true,
       applied: plan.title,
+      planId: plan.id,
+      undoId: undo.id,
       tilesChanged: appliedCount,
       tilesRestorableOnUndo: undo.tiles.length,
       moneySpent: moneyBefore - after.stats.money,
@@ -325,11 +348,31 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           }
         : {}),
     };
+
+    // Keep only the recent history: enough for a retry to recognise itself.
+    appliedPlansRef.current.set(plan.id, result);
+    if (appliedPlansRef.current.size > 20) {
+      appliedPlansRef.current.delete(appliedPlansRef.current.keys().next().value as string);
+    }
+    return result;
   }, [addNotification, latestStateRef, mutateGameState, pushLog, readOnly, showHighlights]);
 
-  const undoAgent = useCallback(() => {
+  const undoAgent = useCallback((undoId?: string) => {
+    if (undoId && undoneIdsRef.current.has(undoId)) {
+      return { ok: true, alreadyUndone: true, undoId };
+    }
+
     const record = undoStack[undoStack.length - 1];
     if (!record) return { ok: false, error: 'Nothing to undo.' };
+
+    if (undoId && record.id !== undoId) {
+      return {
+        ok: false,
+        error: `Undo is a stack: ${undoId} is not the most recent plan. The next one to come off is ${record.id} ("${record.description}"). Undo that first, or call without undoId to take the top.`,
+        nextUndoId: record.id,
+        nextUndoDescription: record.description,
+      };
+    }
 
     if (readOnly) {
       return { ok: false, error: READ_ONLY_REASON, readOnly: true };
@@ -379,6 +422,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
 
+    undoneIdsRef.current.add(record.id);
     flushSync(() => {
       setUndoStack((stack) => stack.slice(0, -1));
     });
@@ -391,6 +435,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     return {
       ok: true,
       undone: record.description,
+      undoId: record.id,
+      nextUndoId: undoStack[undoStack.length - 2]?.id ?? null,
       tilesRestored: restored,
       tilesKeptForHuman: keptForHuman,
       ...(keptForHuman
@@ -412,6 +458,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         case 'get_tool_catalog':
           return {
             ok: true,
+            maxPlanTiles: MAX_PLAN_TILES,
             tools: Object.entries(TOOL_INFO)
               .filter(([tool]) => isPlaceableTool(tool))
               .map(([tool, info]) => ({
@@ -460,6 +507,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             role: currentRole,
             player: AGENT_PLAYER,
             readOnly: readOnly,
+            maxPlanTiles: MAX_PLAN_TILES,
+            nextUndoId: undoStack[undoStack.length - 1]?.id ?? null,
             pendingPlan: pendingRef.current
               ? { title: pendingRef.current.title, tiles: pendingRef.current.placements.length }
               : null,
@@ -588,6 +637,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         }
         case 'propose_placements': {
           const raw = Array.isArray(input.placements) ? input.placements : [];
+          const overflow = Math.max(0, raw.length - MAX_PLAN_TILES);
           const placements: AgentPlacement[] = [];
           const rejected: Json[] = [];
           for (const item of raw.slice(0, MAX_PLAN_TILES)) {
@@ -627,7 +677,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             ok: true,
             needsConfirmation: true,
             plan,
+            maxPlanTiles: MAX_PLAN_TILES,
             ...(rejected.length ? { rejected } : {}),
+            ...(overflow
+              ? {
+                  truncated: true,
+                  droppedForCap: overflow,
+                  note: `Only the first ${MAX_PLAN_TILES} placements are in this plan; ${overflow} were dropped. Send the rest as a second plan after this one is confirmed.`,
+                }
+              : {}),
           };
         }
         case 'propose_service': {
@@ -713,11 +771,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
               needsHuman: true,
             };
           }
-          return confirmPlan();
+          return confirmPlan(null, typeof input.planId === 'string' ? input.planId : undefined);
         case 'reject_plan':
           return rejectPlan();
         case 'undo_agent_actions':
-          return undoAgent();
+          return undoAgent(typeof input.undoId === 'string' ? input.undoId : undefined);
         default:
           return { ok: false, error: `Unknown tool ${name}` };
       }
@@ -733,7 +791,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       revealPlan,
       showHighlights,
       undoAgent,
-      undoStack.length,
+      undoStack,
     ],
   );
 
