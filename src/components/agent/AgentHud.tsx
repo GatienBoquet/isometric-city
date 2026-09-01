@@ -175,34 +175,48 @@ export function AgentHud() {
                   {agent.lastError}
                 </p>
               )}
-              <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  data-testid="approve-plan"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    agent.confirmPlan(plan);
-                  }}
-                  className="min-w-[140px] px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-sm font-bold shadow-lg"
-                >
-                  <T>Approve</T>
-                </button>
-                <button
-                  type="button"
-                  data-testid="reject-plan"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    agent.rejectPlan();
-                  }}
-                  className="min-w-[120px] px-5 py-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-semibold"
-                >
-                  <T>Reject</T>
-                </button>
-              </div>
+              {agent.role === 'co-builder' ? (
+                <div className="mt-4 flex items-center gap-3">
+                  <div className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-amber-500/20 border border-amber-400/30">
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    <span className="text-sm font-semibold text-amber-200">
+                      <T>Building...</T>
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    <T>Co-builder mode: changes apply automatically</T>
+                  </span>
+                </div>
+              ) : (
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    data-testid="approve-plan"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      agent.confirmPlan(plan);
+                    }}
+                    className="min-w-[140px] px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-sm font-bold shadow-lg"
+                  >
+                    <T>Approve</T>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="reject-plan"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      agent.rejectPlan();
+                    }}
+                    className="min-w-[120px] px-5 py-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-semibold"
+                  >
+                    <T>Reject</T>
+                  </button>
+                </div>
+              )}
             </div>
           </div>,
           document.body,

@@ -272,11 +272,15 @@ export function useWebMCPTools(run: Runner, onNative: (native: boolean) => void)
       execute: async (input) => dispatch(def.name, (input || {}) as Record<string, unknown>),
     }));
 
-    void Promise.all(tools.map((item) => registerToolEverywhere(item, { signal: ac.signal }))).catch(
-      (error) => {
+    void Promise.all(tools.map((item) => registerToolEverywhere(item, { signal: ac.signal })))
+      .then(() => {
+        console.log(`[WebMCP] All ${tools.length} tools registered. Check window.__webmcpDebug.listTools() for list.`);
+        console.log('[WebMCP] document.modelContext defined:', Boolean(document.modelContext));
+        console.log('[WebMCP] Tool names:', tools.map((t) => t.name));
+      })
+      .catch((error) => {
         console.warn('[webmcp] tool registration', error);
-      },
-    );
+      });
 
     return () => ac.abort();
   }, []);
