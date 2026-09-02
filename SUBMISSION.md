@@ -1,89 +1,121 @@
-# Second Mayor — pitch, name, demo script
+# Second Mayor — WebMCP Challenge submission
 
-Copy from here into Devpost / the video. Product name is locked.
-
----
-
-## Name
-
-**Second Mayor**
-
-Subtitle: **Co-op IsoCity via WebMCP**
-
-Devpost title: **Second Mayor — play IsoCity with an AI co-mayor**
-
-Do not submit as “IsoCity WebMCP wrapper.”
+**Live:** <https://isometric-city-webmcp.vercel.app/?play=example>
+**Repo:** <https://github.com/GatienBoquet/isometric-city>
 
 ---
 
-## One-liner
+## What it is
 
-You play a canvas city. An AI co-mayor shares the same map, ghosts a plan, and waits for you. Nothing builds until you say so.
+A city builder you play together with an AI agent.
 
----
+IsoCity draws everything on an HTML5 canvas. There are no DOM tiles, so an agent
+that clicks buttons and reads the page sees one `<canvas>` element and nothing
+else. It cannot read the city and it cannot act on it.
 
-## Devpost text (paste)
+Second Mayor gives the page 21 WebMCP tools. The agent can now inspect the map,
+read the budget, see what is going wrong, and propose construction. What it
+cannot do is build behind your back. Every write goes through a plan you see as
+yellow ghost tiles before anything is charged or placed.
 
-### Why this use case fits WebMCP
+## What was added during the submission period
 
-IsoCity renders the city on HTML5 Canvas. There are no tile buttons, no DOM grid. A scraping or click-driving agent cannot see or play the game. WebMCP is not a nicer API here — it is the only way a person and an agent share that live map.
+The base game is [amilich/isometric-city](https://github.com/amilich/isometric-city)
+(MIT), which existed before this hackathon. Its rendering, simulation and economy
+are upstream and unchanged.
 
-### How it improves the experience
+Everything agent-facing is new work for this challenge:
 
-Without WebMCP the agent is blind. With it, the agent reads live stats, points at neighborhoods, and paints a **ghost plan** on the isometric tiles you are already looking at. You stay on the mouse. Approve, Reject, or Undo. Two operators, one canvas.
+| Added | Where |
+| --- | --- |
+| WebMCP tool registration (21 tools) | `src/hooks/useWebMCPTools.ts` |
+| Plan lifecycle: propose, ghost, confirm, reject, undo | `src/context/AgentContext.tsx` |
+| Agent types, role model, plan caps | `src/lib/agent/types.ts` |
+| Second Mayor HUD, mode toggle, action log | `src/components/` |
+| Ghost preview rendering on the canvas | `src/components/` |
+| `Origin-Agent-Cluster` and `Permissions-Policy` headers | `next.config.js` |
 
-### What people and agents can do together that was hard or impossible
+First agent-layer commit: `[[DATE]]`. All WebMCP work is in the history from
+that point forward.
 
-Impossible before: play this city with an assistant at all.
+## How WebMCP is used
 
-Now: you set the goal (“housing, keep budget green”). The agent inspects, highlights, ghosts one plan. You confirm or refuse. In **co-builder**, the agent may `confirm_plan` after you have seen the ghost; you can still undo **only the agent’s** last plan. That is co-op, not autopilot.
+Tools are registered with `document.modelContext.registerTool`.
 
-### How it is implemented (short)
+| | Tools |
+| --- | --- |
+| Read | `get_city_state` `get_tool_catalog` `inspect_region` `get_problems` `get_pending_plan` `get_agent_status` |
+| Point | `highlight_tiles` `clear_highlights` `focus_tile` `add_agent_note` |
+| Role | `request_role` |
+| Propose | `propose_zone_region` `propose_road_path` `propose_placements` `propose_service` `propose_bulldoze` `propose_tax_rate` `propose_budget` |
+| Commit | `confirm_plan` `reject_plan` `undo_agent_actions` |
 
-Client-only. Inside `GameProvider`, tools register with `document.modelContext.registerTool`. Reads use `latestStateRef` (the live sim, not the throttled React UI). Writes never mutate immediately: they create a pending plan, yellow overlay, and a confirm bar. `confirm_plan` is allowed only in co-builder. Mutations apply to the live ref so the 200ms sim tick cannot clobber Approve. Headers: `Origin-Agent-Cluster: ?1`, `Permissions-Policy: tools=(self)`. Polyfill + in-page inspector for browsers without native WebMCP. No Supabase for the agent.
+Four decisions worth calling out:
 
----
+**Reads go through a live ref, not React state.** The simulation advances on
+every tick. Tools read the city as it is at the moment of the call, not as React
+last rendered it.
 
-## Talk track (15 seconds)
+**Confirmation is idempotent.** WebMCP can deliver the same call twice.
+`confirm_plan` keeps applied plans in a cache and returns `alreadyApplied`
+instead of building the same thing again.
 
-IsoCity is canvas. An agent can’t click it. We registered WebMCP tools on the page so the agent looks at the same city you do, ghosts a park in yellow, and waits. You stay mayor.
+**The plan cap is published, not hidden.** `get_tool_catalog` and
+`get_agent_status` both report `maxPlanTiles: 200`. Past that,
+`propose_placements` answers with `truncated` and `droppedForCap`, so the agent
+knows exactly what got dropped rather than guessing why its plan came back
+smaller.
 
----
+**Undo compares the grid.** Applying a plan diffs the map before and after, so
+undo restores what actually changed. A tile is only reverted if it still looks
+the way the agent left it. If you built a school on top of the agent's road,
+undo leaves your school alone. Retrying an undo is safe and returns
+`alreadyUndone`.
 
-## 3-minute demo script
+## Roles
 
-Record in **ChatGPT’s in-app browser** if you can (how judges may test). Chrome + flag is backup. Audio on. No music.
+| Mode | Agent can | You |
+| --- | --- | --- |
+| **Advisor** (default) | Inspect, highlight, ghost a plan | You click **Approve** |
+| **Co-builder** | Same, plus `confirm_plan` after the ghost | You still see the ghost and can still **Undo** |
 
-| Time | On screen | You say |
-|---|---|---|
-| 0:00–0:20 | Landing → **Play with Second Mayor** (`/?play=example`). HUD: Advisor. | “This is IsoCity. The map is canvas — nothing to scrape. Second Mayor is a WebMCP co-op partner on this same tab.” |
-| 0:20–0:50 | Agent: `get_city_state`, `get_problems`. Yellow problem marks optional. | “Housing demand is maxed. Budget is still green. Don’t autoplay — show me a small plan.” |
-| 0:50–1:20 | Ghost **one park** on empty grass (e.g. by City Hall). Yellow tile + **Second Mayor needs you**. | “Yellow is a proposal. Nothing is spent yet.” |
-| 1:20–1:50 | You click **Approve**. Park sprite appears. Log: proposed → built. | “I approved. That’s a real park, not a highlight.” |
-| 1:50–2:25 | Switch **Co-builder**. Agent ghosts another park/tree, then `confirm_plan`. | “Co-builder: I still see the ghost. The agent may commit. I can still undo.” |
-| 2:25–2:50 | You click **Undo**. Tile reverts. | “Undo is agent-only. My buildings stay.” |
-| 2:50–3:00 | HUD + map. | “Human stays mayor. Agent is the second hand. WebMCP is the only way this game can be co-op with AI.” |
+The mode is set by the human in the HUD. `request_role` only raises a request;
+an agent cannot promote itself and then approve its own plans.
 
-**Do not** ghost a huge downtown zone. It looks like nothing after Approve.
+Inside a co-op room the agent stays advisory and declines to commit, because
+agent builds do not sync to the other player.
 
-**Do** `propose_service` with `park` or `tree` on `building === grass`.
+## Testing instructions
 
----
+No login needed.
 
-## Shot list (if you cut later)
+**Browser.** Open the URL in ChatGPT's in-app browser, or in Chrome with
+`chrome://flags/#enable-webmcp-testing` set to Enabled and the browser
+relaunched. WebMCP tools will not appear in a normal Chrome tab. This build also
+ships a same-tab polyfill and an **Agent tools** inspector if you want to call
+tools by hand.
 
-1. Canvas close-up (cars, no DOM).
-2. HUD Advisor.
-3. Yellow ghost + Approve bar.
-4. Park appears.
-5. Co-builder confirm.
-6. Undo.
-7. One line of `registerTool` in the repo.
+**Steps.**
 
----
+1. Open <https://isometric-city-webmcp.vercel.app/?play=example>, or click
+   **Play with Second Mayor** on the landing page.
+2. Pick a mode in the HUD: Advisor or Co-builder.
+3. Point your agent at the page and ask it something.
 
-## Repo blurb (GitHub description)
+**Try these.**
 
-`Second Mayor: co-op IsoCity with a WebMCP agent. Ghost plans on the canvas; you approve.`
+- Advisor: *"Look at my city and tell me what is wrong with it."*
+- Co-builder: *"Housing demand is high. Keep the budget green. Ghost one small
+  plan on empty grass and wait for me."*
 
-Topics: `webmcp` `nextjs` `canvas` `game` `hackathon`
+The agent ghosts its plan in yellow. Click **Approve** to build it, **Reject**
+to drop it, or **Undo** afterwards.
+
+**Demo note.** Ghost real buildings (park, tree) on empty grass. Zoning a
+downtown block looks yellow but often commits nothing visible, because roads
+stay roads until the simulation grows shops.
+
+## License
+
+MIT. IsoCity © amilich. Second Mayor / WebMCP layer © the authors of this fork.
+See [`LICENSE`](./LICENSE).
