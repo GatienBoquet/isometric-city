@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -19,8 +19,11 @@ interface ShareModalProps {
 }
 
 export function ShareModal({ open, onOpenChange }: ShareModalProps) {
-  const [copied, setCopied] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const [copiedAt, setCopiedAt] = useState(0);
+  // Guards the in-flight create so a re-render cannot start a second room. A
+  // ref rather than state: nothing renders off it — the spinner already shows
+  // whenever there is no room code yet.
+  const creatingRef = useRef(false);
   
   const { roomCode, createRoom } = useMultiplayer();
   const { state, isStateReady } = useGame();
@@ -28,36 +31,34 @@ export function ShareModal({ open, onOpenChange }: ShareModalProps) {
   // Create room when modal opens (if not already in a room)
   // IMPORTANT: Wait for isStateReady to ensure we have the loaded state, not the default empty state
   useEffect(() => {
-    if (open && !roomCode && !isCreating && isStateReady) {
-      setIsCreating(true);
-      createRoom(state.cityName, state)
-        .then((code) => {
-          // Update URL to show room code
-          window.history.replaceState({}, '', `/coop/${code}`);
-        })
-        .catch((err) => {
-          console.error('[ShareModal] Failed to create room:', err);
-        })
-        .finally(() => {
-          setIsCreating(false);
-        });
-    }
-  }, [open, roomCode, isCreating, isStateReady, createRoom, state]);
+    if (!open || roomCode || creatingRef.current || !isStateReady) return;
 
-  // Reset copied state when modal closes
-  useEffect(() => {
-    if (!open) {
-      setCopied(false);
-    }
-  }, [open]);
+    creatingRef.current = true;
+    createRoom(state.cityName, state)
+      .then((code) => {
+        // Update URL to show room code
+        window.history.replaceState({}, '', `/coop/${code}`);
+      })
+      .catch((err) => {
+        console.error('[ShareModal] Failed to create room:', err);
+      })
+      .finally(() => {
+        creatingRef.current = false;
+      });
+  }, [open, roomCode, isStateReady, createRoom, state]);
+
+  // "Copied" is transient and scoped to this opening of the modal, so derive it
+  // rather than resetting state from an effect when the modal closes.
+  const copied = open && copiedAt > 0;
 
   const handleCopyLink = () => {
     if (!roomCode) return;
 
     const url = `${window.location.origin}/coop/${roomCode}`;
     navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const at = Date.now();
+    setCopiedAt(at);
+    setTimeout(() => setCopiedAt((current) => (current === at ? 0 : current)), 2000);
   };
 
   const inviteUrl = roomCode ? `${window.location.origin}/coop/${roomCode}` : '';
@@ -75,7 +76,7 @@ export function ShareModal({ open, onOpenChange }: ShareModalProps) {
         </DialogHeader>
 
         <div className="space-y-6 py-4 overflow-hidden">
-          {isCreating || !roomCode ? (
+          {!roomCode ? (
             <div className="flex items-center justify-center gap-2 py-8">
               <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
               <span className="text-slate-400">Creating co-op session...</span>

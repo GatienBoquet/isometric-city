@@ -20,17 +20,19 @@ interface ShareModalProps {
 }
 
 export function CoasterShareModal({ open, onOpenChange }: ShareModalProps) {
-  const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const hasAttemptedCreateRef = useRef(false);
+  // Guards the in-flight create. A ref rather than state: nothing renders off
+  // it, and the effect must not set state synchronously.
+  const isCreatingRef = useRef(false);
 
   const { roomCode, createRoom } = useMultiplayer();
   const { state, isStateReady } = useCoaster();
   const { copied: copiedRoomLink, handleCopyRoomLink, resetCopied } = useCopyRoomLink(roomCode, 'coaster/coop');
 
   const attemptCreateRoom = useCallback(() => {
-    if (isCreating || roomCode || !isStateReady) return;
-    setIsCreating(true);
+    if (isCreatingRef.current || roomCode || !isStateReady) return;
+    isCreatingRef.current = true;
     setCreateError(null);
     createRoom(state.settings.name, state)
       .then((code) => {
@@ -42,23 +44,31 @@ export function CoasterShareModal({ open, onOpenChange }: ShareModalProps) {
         setCreateError(message);
       })
       .finally(() => {
-        setIsCreating(false);
+        isCreatingRef.current = false;
       });
-  }, [createRoom, isCreating, isStateReady, roomCode, state]);
+  }, [createRoom, isStateReady, roomCode, state]);
 
   useEffect(() => {
     if (!open) {
-      resetCopied();
-      setCreateError(null);
       hasAttemptedCreateRef.current = false;
-      return;
+      // Queued: clearing the modal's transient state synchronously on close
+      // cascades another render.
+      const timer = setTimeout(() => {
+        resetCopied();
+        setCreateError(null);
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
-    if (!roomCode && !isCreating && isStateReady && !createError && !hasAttemptedCreateRef.current) {
+    if (!roomCode && isStateReady && !createError && !hasAttemptedCreateRef.current) {
       hasAttemptedCreateRef.current = true;
-      attemptCreateRoom();
+      // Queued: attemptCreateRoom clears the previous error, and doing that
+      // synchronously from an effect cascades another render. The retry button
+      // calls it directly, where an immediate update is what you want.
+      const timer = setTimeout(attemptCreateRoom, 0);
+      return () => clearTimeout(timer);
     }
-  }, [open, roomCode, isCreating, isStateReady, createError, attemptCreateRoom, resetCopied]);
+  }, [open, roomCode, isStateReady, createError, attemptCreateRoom, resetCopied]);
 
   const inviteUrl = roomCode ? `${window.location.origin}/coaster/coop/${roomCode}` : '';
 

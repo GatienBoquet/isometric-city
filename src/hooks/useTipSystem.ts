@@ -171,32 +171,42 @@ export function useTipSystem(state: GameState): UseTipSystemReturn {
   const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasLoadedRef = useRef(false);
   
-  // Use a ref to always have the latest state without causing effect re-runs
+  // Use a ref to always have the latest state without causing effect re-runs.
+  // Written after the commit rather than during render; the only reader is the
+  // periodic tip check, which runs on an interval of many seconds.
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => {
+    stateRef.current = state;
+  });
 
-  // Load preferences from localStorage
+  // Load preferences from localStorage. Queued rather than applied
+  // synchronously so mounting does not cascade a second render; nothing shows
+  // a tip until hasLoadedRef flips anyway.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
-    try {
-      const disabled = localStorage.getItem(STORAGE_KEY);
-      if (disabled === 'true') {
-        setTipsEnabledState(false);
-      }
-      
-      const shown = localStorage.getItem(SHOWN_TIPS_KEY);
-      if (shown) {
-        const parsed = JSON.parse(shown);
-        if (Array.isArray(parsed)) {
-          setShownTips(new Set(parsed as TipId[]));
+
+    const timer = setTimeout(() => {
+      try {
+        const disabled = localStorage.getItem(STORAGE_KEY);
+        if (disabled === 'true') {
+          setTipsEnabledState(false);
         }
+
+        const shown = localStorage.getItem(SHOWN_TIPS_KEY);
+        if (shown) {
+          const parsed = JSON.parse(shown);
+          if (Array.isArray(parsed)) {
+            setShownTips(new Set(parsed as TipId[]));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load tip preferences:', e);
       }
-    } catch (e) {
-      console.error('Failed to load tip preferences:', e);
-    }
-    
-    hasLoadedRef.current = true;
+
+      hasLoadedRef.current = true;
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Save shown tips to localStorage when they change

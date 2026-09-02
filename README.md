@@ -1,76 +1,83 @@
-# IsoCity & IsoCoaster
+# Second Mayor
 
-Open-source isometric city and theme park builder built with NextJS, TypeScript, and HTML5 Canvas.
+**Play IsoCity with an AI co-mayor on the same live map.**
 
-<table>
-<tr>
-<td width="50%" align="center"><strong>IsoCity</strong></td>
-<td width="50%" align="center"><strong>IsoCoaster</strong></td>
-</tr>
-<tr>
-<td><img src="public/readme-image.png" width="100%"></td>
-<td><img src="public/readme-coaster.png" width="100%"></td>
-</tr>
-<tr>
-<td align="center">City builder with trains, planes, cars, and pedestrians<br><a href="https://iso-city.com">iso-city.com</a></td>
-<td align="center">Theme park builder with roller coasters, rides, and guests<br><a href="https://iso-coaster.com">iso-coaster.com</a></td>
-</tr>
-</table>
+IsoCity is a canvas city builder. There are no DOM tiles to scrape or click — a normal agent cannot play it. This fork adds [WebMCP](https://webmachinelearning.github.io/webmcp/): the page registers tools, the agent inspects the city you are looking at, **ghosts a plan in yellow**, and waits. You Approve, Reject, or Undo. It does not autoplay.
 
-Made with [Cursor](https://cursor.com).
+Fork of [amilich/isometric-city](https://github.com/amilich/isometric-city) (MIT). Demo city: [`/?play=example`](http://localhost:3000/?play=example)
 
-## Features
+> You stay mayor. The agent is the second hand.
 
--   **Isometric Rendering Engine**: Rendering with HTML5 Canvas (`CanvasIsometricGrid`) capable of handling complex depth sorting, layer management, and both image and canvas sprites.
--   **Dynamic Simulation**:
-    -   **Traffic System**: Autonomous vehicles including cars, trains, planes, buses, and seaplanes.
-    -   **Trains, bridges, buses, barges, and more**: Vehicles will navigate throughout your city and respect traffic lights.
-    -   **Pedestrian System**: Pathfinding and crowd simulation for city inhabitants.
-    -   **Economy & Resources**: Resource management, zoning (Residential, Commercial, Industrial), and city growth logic.
--   **Interactive Grid**: Tile-based placement system for buildings, roads, rail, parks, utilities, and more.
--   **State Management**: Save and load functionality for multiple cities.
--   **Responsive Design**: Mobile-friendly interface with touch friendly controls, drawers, and toolbars.
+## Try it
 
-## Tech Stack
+Requires Node.js 18+ and npm.
 
--   **Framework**: [Next.js 16](https://nextjs.org/)
--   **Language**: [TypeScript](https://www.typescriptlang.org/)
--   **Graphics**: HTML5 Canvas (No external game engine libraries; pure native implementation).
--   **Icons**: Lucide React icons.
+```bash
+npm install
+npm run dev     # dev server
+npm run build   # production build (also type-checks)
+npm run lint    # ESLint
+```
 
-## Getting Started
+Open [http://localhost:3000/?play=example](http://localhost:3000/?play=example) or the landing button **Play with Second Mayor**.
 
-### Prerequisites
+- **ChatGPT** in-app browser supports WebMCP natively.
+- **Chrome**: `chrome://flags/#enable-webmcp-testing` (this build also ships a same-tab polyfill + **Agent tools** inspector).
 
--   Node.js (v18 or higher)
--   npm
+Ask the agent, for example:
 
-### Installation
+> Housing demand is high. Keep the budget green. Ghost one small plan on empty grass and wait for me.
 
-1.  **Clone the repository**
-    ```bash
-    git clone https://github.com/amilich/isometric-city.git
-    cd isometric-city
-    ```
+## How co-op works
 
-2.  **Install dependencies**
-    ```bash
-    npm install
-    ```
+```
+see → point → ghost → you confirm → undo agent only
+```
 
-3.  **Run the development server**
-    ```bash
-    npm run dev
-    ```
+| Mode | Agent | You |
+|---|---|---|
+| **Advisor** (default) | Inspect, highlight, ghost | Must click **Approve** |
+| **Co-builder** | Same + `confirm_plan` | Still see the ghost; still **Undo** |
 
-4.  **Open the game**
-    Visit [http://localhost:3000](http://localhost:3000) to play IsoCity. 
-    Visit [http://localhost:3000/coaster](http://localhost:3000/coaster) for IsoCoaster.
+The mode is yours alone. `request_role` only raises a request in the HUD — an
+agent cannot promote itself to co-builder and then approve its own plans.
 
-## Contributing
+Writes (zone, park, tax, budget) always go through a pending plan. The action log (**Show actions**) lists proposed / built / undone. Undo reverts the **agent’s** last plan, not your builds.
 
-Contributions, bug reports, and feature requests are welcome.
+The agent is a local player in **this tab**. It does not join Supabase — so
+while a co-op room is open it stays advisory (inspect, highlight, propose) and
+declines to commit, rather than building tiles the other player would never
+receive.
+
+## WebMCP tools
+
+Registered with `document.modelContext.registerTool` (`src/hooks/useWebMCPTools.ts`).
+
+| | Tools |
+|---|---|
+| Read | `get_city_state` `get_tool_catalog` `inspect_region` `get_problems` `get_pending_plan` `get_agent_status` |
+| Point | `highlight_tiles` `clear_highlights` `focus_tile` `add_agent_note` |
+| Role | `request_role` — asks; only the human flips the toggle |
+| Propose | `propose_zone_region` `propose_road_path` `propose_placements` `propose_service` `propose_bulldoze` `propose_tax_rate` `propose_budget` |
+| Commit | `confirm_plan` `reject_plan` `undo_agent_actions` |
+
+Headers: `Origin-Agent-Cluster: ?1`, `Permissions-Policy: tools=(self)`.
+
+Local debug: `window.__agentCity.executeTool('get_city_state', {})`.
+
+## Demo note
+
+**Ghost real buildings** (park, tree) on **empty grass**. Zoning a downtown block looks yellow and often commits nothing visible — roads stay roads until the sim grows shops.
+
+## IsoCity (upstream)
+
+The board is IsoCity: Next.js 16, React 19, TypeScript, HTML5 Canvas, Tailwind
+and shadcn/ui — no game engine. Zoning R/C/I, budget, traffic, trains, saves.
+The repo also still contains IsoCoaster (`/coaster`), the upstream theme-park
+builder; it is unchanged and out of scope for Second Mayor.
+
+Upstream: [iso-city.com](https://iso-city.com) · [github.com/amilich/isometric-city](https://github.com/amilich/isometric-city)
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+MIT. IsoCity © amilich. Second Mayor / WebMCP layer © the authors of this fork. See `LICENSE`.

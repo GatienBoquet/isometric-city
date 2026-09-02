@@ -35,14 +35,27 @@ import {
 import { MiniMap } from '@/components/game/MiniMap';
 import { TopBar, StatsPanel } from '@/components/game/TopBar';
 import { CanvasIsometricGrid } from '@/components/game/CanvasIsometricGrid';
+import { AgentHud } from '@/components/agent/AgentHud';
+import { AgentInspector } from '@/components/agent/AgentInspector';
+import { AgentOverlayCanvas } from '@/components/agent/AgentOverlayCanvas';
+import { AgentProvider, useAgent } from '@/context/AgentContext';
 
 // Cargo type names for notifications
 const CARGO_TYPE_NAMES = [msg('containers'), msg('bulk materials'), msg('oil')];
 
 export default function Game({ onExit }: { onExit?: () => void }) {
+  return (
+    <AgentProvider>
+      <GameScreen onExit={onExit} />
+    </AgentProvider>
+  );
+}
+
+function GameScreen({ onExit }: { onExit?: () => void }) {
   const gt = useGT();
   const m = useMessages();
   const { state, setTool, setActivePanel, addMoney, addNotification, setSpeed } = useGame();
+  const agent = useAgent();
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('none');
   const [selectedTile, setSelectedTile] = useState<{ x: number; y: number } | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<{ x: number; y: number } | null>(null);
@@ -186,6 +199,14 @@ export default function Game({ onExit }: { onExit?: () => void }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [state.activePanel, state.selectedTool, state.speed, selectedTile, setActivePanel, setTool, setSpeed, overlayMode]);
 
+  // The agent's focus tile drives the camera directly rather than through an
+  // effect that mirrors it into navigationTarget.
+  const cameraTarget = agent.focus ?? navigationTarget;
+  const onCameraArrived = () => {
+    setNavigationTarget(null);
+    agent.clearFocus();
+  };
+
   // Handle cheat code triggers
   useEffect(() => {
     if (!triggeredCheat) return;
@@ -261,13 +282,21 @@ export default function Game({ onExit }: { onExit?: () => void }) {
           
           {/* Main canvas area - fills remaining space, with padding for top/bottom bars */}
           <div className="flex-1 relative overflow-hidden" style={{ paddingTop: '72px', paddingBottom: '76px' }}>
-            <CanvasIsometricGrid 
-              overlayMode={overlayMode} 
-              selectedTile={selectedTile} 
-              setSelectedTile={setSelectedTile}
-              isMobile={true}
-              onBargeDelivery={handleBargeDelivery}
-            />
+            <div className="relative w-full h-full">
+              <CanvasIsometricGrid 
+                overlayMode={overlayMode} 
+                selectedTile={selectedTile} 
+                setSelectedTile={setSelectedTile}
+                isMobile={true}
+                navigationTarget={cameraTarget}
+                onNavigationComplete={onCameraArrived}
+                onViewportChange={setViewport}
+                onBargeDelivery={handleBargeDelivery}
+              />
+              <AgentOverlayCanvas viewport={viewport} />
+            </div>
+            <AgentHud />
+            <AgentInspector />
             
             {/* Multiplayer Players Indicator - Mobile */}
             {isMultiplayer && (
@@ -324,7 +353,7 @@ export default function Game({ onExit }: { onExit?: () => void }) {
           {/* Tip Toast for helping new players */}
           <TipToast
             message={currentTip || ''}
-            isVisible={isTipVisible}
+            isVisible={isTipVisible && !agent.pendingPlan}
             onContinue={onTipContinue}
             onSkipAll={onTipSkipAll}
           />
@@ -347,11 +376,14 @@ export default function Game({ onExit }: { onExit?: () => void }) {
               overlayMode={overlayMode} 
               selectedTile={selectedTile} 
               setSelectedTile={setSelectedTile}
-              navigationTarget={navigationTarget}
-              onNavigationComplete={() => setNavigationTarget(null)}
+              navigationTarget={cameraTarget}
+              onNavigationComplete={onCameraArrived}
               onViewportChange={setViewport}
               onBargeDelivery={handleBargeDelivery}
             />
+            <AgentOverlayCanvas viewport={viewport} />
+            <AgentHud />
+            <AgentInspector />
             <OverlayModeToggle overlayMode={overlayMode} setOverlayMode={setOverlayMode} />
             <MiniMap onNavigate={(x, y) => setNavigationTarget({ x, y })} viewport={viewport} />
             
@@ -404,7 +436,7 @@ export default function Game({ onExit }: { onExit?: () => void }) {
         {/* Tip Toast for helping new players */}
         <TipToast
           message={currentTip || ''}
-          isVisible={isTipVisible}
+          isVisible={isTipVisible && !agent.pendingPlan}
           onContinue={onTipContinue}
           onSkipAll={onTipSkipAll}
         />

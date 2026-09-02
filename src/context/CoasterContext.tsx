@@ -1527,23 +1527,28 @@ export function CoasterProvider({
   // Fix disconnected tracks after state is ready (handles existing sessions)
   useEffect(() => {
     if (!isStateReady) return;
-    
-    setState(prev => {
-      const { grid: fixedGrid, coasters: fixedCoasters, changed } = ensureAllTracksHaveCoasters(
-        prev.grid,
-        prev.coasters
-      );
-      
-      if (changed) {
-        console.log('Fixed disconnected coaster tracks');
-        return {
-          ...prev,
-          grid: fixedGrid,
-          coasters: fixedCoasters,
-        };
-      }
-      return prev;
-    });
+
+    // One-shot repair pass, queued rather than run synchronously so becoming
+    // ready does not cascade a second render of the whole park.
+    const timer = setTimeout(() => {
+      setState(prev => {
+        const { grid: fixedGrid, coasters: fixedCoasters, changed } = ensureAllTracksHaveCoasters(
+          prev.grid,
+          prev.coasters
+        );
+
+        if (changed) {
+          console.log('Fixed disconnected coaster tracks');
+          return {
+            ...prev,
+            grid: fixedGrid,
+            coasters: fixedCoasters,
+          };
+        }
+        return prev;
+      });
+    }, 0);
+    return () => clearTimeout(timer);
   }, [isStateReady]);
   
   // Auto-save periodically using async worker-based save (no stuttering!)

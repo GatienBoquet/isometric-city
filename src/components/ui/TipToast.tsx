@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { createPortal } from 'react-dom';
 import { X, Lightbulb, SkipForward, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { T, useGT, useMessages } from 'gt-next';
+import { useIsClient } from '@/hooks/useIsClient';
 
 export interface TipToastProps {
   message: string;
@@ -17,43 +18,23 @@ export interface TipToastProps {
 function TipToastContent({ message, isVisible, onContinue, onSkipAll }: TipToastProps) {
   const gt = useGT();
   const m = useMessages();
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [shouldRender, setShouldRender] = useState(false);
 
-  useEffect(() => {
-    if (isVisible) {
-      setShouldRender(true);
-      // Small delay to trigger animation
-      const frame = requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setIsAnimating(true);
-        });
-      });
-      return () => cancelAnimationFrame(frame);
-    } else {
-      setIsAnimating(false);
-      // Wait for exit animation before unmounting
-      const timer = setTimeout(() => {
-        setShouldRender(false);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [isVisible]);
-
-  if (!shouldRender) return null;
-
+  // The toast stays mounted and animates on `isVisible` alone. Mirroring that
+  // prop into render/animation state needed a pair of effects that set state
+  // synchronously; CSS does the same job with none.
   return (
     <div
+      aria-hidden={!isVisible}
       className={cn(
-        'fixed z-[9999] pointer-events-auto',
+        'fixed z-[9999]',
         'transition-all duration-300 ease-out',
         // Mobile: top position below toolbar, full width with margins
         'top-20 left-3 right-3',
         // Desktop: bottom center position
         'md:top-auto md:bottom-6 md:left-1/2 md:right-auto md:-translate-x-1/2',
-        isAnimating 
-          ? 'opacity-100 translate-y-0' 
-          : cn('opacity-0', 'max-md:-translate-y-4', 'md:translate-y-4')
+        isVisible
+          ? 'pointer-events-auto opacity-100 translate-y-0'
+          : cn('pointer-events-none opacity-0', 'max-md:-translate-y-4', 'md:translate-y-4')
       )}
       style={{ position: 'fixed' }}
     >
@@ -120,11 +101,7 @@ function TipToastContent({ message, isVisible, onContinue, onSkipAll }: TipToast
 }
 
 export function TipToast(props: TipToastProps) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useIsClient();
 
   // Use portal to render at document body level to avoid z-index/overflow issues
   if (!mounted || typeof document === 'undefined') {

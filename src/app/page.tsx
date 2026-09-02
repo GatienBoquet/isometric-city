@@ -13,6 +13,8 @@ import { decompressFromUTF16, compressToUTF16 } from 'lz-string';
 import { LanguageSelector } from '@/components/ui/LanguageSelector';
 import { T } from 'gt-next';
 import { Users, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { setLaunchMode } from '@/lib/launchGame';
 
 const STORAGE_KEY = 'isocity-game-state';
 const SAVED_CITIES_INDEX_KEY = 'isocity-saved-cities-index';
@@ -316,6 +318,36 @@ function SavedCityCard({ city, onLoad, onDelete }: { city: SavedCityMeta; onLoad
 
 const SAVED_CITY_PREFIX = 'isocity-city-';
 
+/**
+ * Copy whatever is in the autosave slot into the saved-cities list before we
+ * overwrite that slot with a new city. Starting a fresh game must never be the
+ * thing that loses a player's city.
+ */
+function archiveAutosavedCity(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const compressed = localStorage.getItem(STORAGE_KEY);
+    if (!compressed) return true;
+
+    const json = decompressFromUTF16(compressed);
+    const state: GameState | null = json && json.startsWith('{') ? JSON.parse(json) : null;
+    if (!state?.grid || !state.stats) return true;
+
+    const cityId = state.id || `city-${Date.now()}`;
+    // The autosave payload is already compressed in the same format, so it can
+    // be copied across without a round trip through the compressor.
+    localStorage.setItem(SAVED_CITY_PREFIX + cityId, compressed);
+    saveCityToIndex({ ...state, id: cityId });
+    return true;
+  } catch (e) {
+    // Most likely the storage quota: archiving briefly doubles the city's
+    // footprint. Report it so the caller can stop rather than start a new city
+    // over the top of one it could not save.
+    console.error('Failed to archive current city', e);
+    return false;
+  }
+}
+
 export default function HomePage() {
   const [showGame, setShowGame] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
@@ -327,6 +359,20 @@ export default function HomePage() {
   const [pendingRoomCode, setPendingRoomCode] = useState<string | null>(null);
   const { isMobileDevice, isSmallScreen } = useMobile();
   const isMobile = isMobileDevice || isSmallScreen;
+  const router = useRouter();
+
+  const goPlay = (mode: 'new' | 'continue') => {
+    if (mode === 'new' && !archiveAutosavedCity()) {
+      // Losing the city is the one outcome archiving exists to prevent, so this
+      // is the human's call, not ours.
+      const proceed = window.confirm(
+        'Your current city could not be saved (browser storage is full). Starting a new city will replace it. Continue anyway?',
+      );
+      if (!proceed) return;
+    }
+    setLaunchMode(mode);
+    router.push('/play');
+  };
 
   // Check for saved game and room code in URL after mount
   useEffect(() => {
@@ -343,11 +389,37 @@ export default function HomePage() {
         window.location.replace(`/coop/${roomCode.toUpperCase()}`);
         return;
       }
-      // Always show landing page - don't auto-load into game
-      // User can select from saved cities or start new
+      const play = params.get('play');
+      if (play === 'new' || play === 'agent') {
+        archiveAutosavedCity();
+        setLaunchMode('new');
+        router.replace('/play');
+        return;
+      }
+      if (play === 'example') {
+        void (async () => {
+          try {
+            const response = await fetch('/example-states/example_state_9.json');
+            const exampleState = await response.json();
+            const compressed = compressToUTF16(JSON.stringify(exampleState));
+            archiveAutosavedCity();
+            localStorage.setItem(STORAGE_KEY, compressed);
+          } catch (e) {
+            console.error('Failed to load example city', e);
+          }
+          setLaunchMode('continue');
+          router.replace('/play');
+        })();
+        return;
+      }
+      if (play === '1' || play === 'continue') {
+        setLaunchMode('continue');
+        router.replace('/play');
+      }
     };
-    // Use requestAnimationFrame to avoid synchronous setState in effect
-    requestAnimationFrame(checkSavedGame);
+    // setTimeout so this still runs in background tabs (rAF is throttled to 0 there)
+    const timer = window.setTimeout(checkSavedGame, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // Handle exit from game - refresh saved cities list
@@ -376,7 +448,7 @@ export default function HomePage() {
       const saved = localStorage.getItem(SAVED_CITY_PREFIX + city.id);
       if (saved) {
         localStorage.setItem(STORAGE_KEY, saved);
-        setShowGame(true);
+        goPlay('continue');
       }
     } catch {
       console.error('Failed to load saved city');
@@ -489,7 +561,7 @@ export default function HomePage() {
           {/* Buttons - more compact */}
           <div className="flex flex-col gap-2 sm:gap-3 w-full max-w-xs flex-shrink-0">
             <Button 
-              onClick={() => setShowGame(true)}
+              onClick={() => goPlay(hasSaved ? 'continue' : 'new')}
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
             >
               {hasSaved ? <T>Continue</T> : <T>New Game</T>}
@@ -501,6 +573,13 @@ export default function HomePage() {
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/15 rounded-none transition-all duration-300"
             >
               <T>Co-op</T>
+            </Button>
+            <Button
+              onClick={() => goPlay('new')}
+              variant="outline"
+              className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
+            >
+              <T>Play with Second Mayor</T>
             </Button>
 
             <Button
@@ -518,7 +597,7 @@ export default function HomePage() {
                 } catch (e) {
                   console.error('Failed to save example state:', e);
                 }
-                setShowGame(true);
+                goPlay('continue');
               }}
               variant="outline"
               className="w-full py-4 sm:py-6 text-lg sm:text-xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"
@@ -598,17 +677,24 @@ export default function HomePage() {
             </h1>
             <div className="flex flex-col gap-3">
               <Button 
-                onClick={() => setShowGame(true)}
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
+                onClick={() => goPlay(hasSaved ? 'continue' : 'new')}
+                className="w-80 py-8 text-2xl font-light tracking-wide bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-none transition-all duration-300"
               >
                 {hasSaved ? <T>Continue</T> : <T>New Game</T>}
               </Button>
               <Button
                 onClick={() => setShowCoopModal(true)}
                 variant="outline"
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/15 rounded-none transition-all duration-300"
+                className="w-80 py-8 text-2xl font-light tracking-wide bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/15 rounded-none transition-all duration-300"
               >
                 <T>Co-op</T>
+              </Button>
+              <Button
+                onClick={() => goPlay('new')}
+                variant="outline"
+                className="w-80 py-8 text-xl font-light tracking-wide px-4 bg-sky-500/20 hover:bg-sky-500/30 text-sky-100 border border-sky-400/30 rounded-none transition-all duration-300"
+              >
+                <T>Play with Second Mayor</T>
               </Button>
               <Button
                 onClick={async () => {
@@ -625,14 +711,14 @@ export default function HomePage() {
                   } catch (e) {
                     console.error('Failed to save example state:', e);
                   }
-                  setShowGame(true);
+                  goPlay('continue');
                 }}
                 variant="outline"
-                className="w-64 py-8 text-2xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"
+                className="w-80 py-8 text-2xl font-light tracking-wide bg-transparent hover:bg-white/10 text-white/40 hover:text-white/60 border border-white/10 rounded-none transition-all duration-300"
               >
                 <T>Load Example</T>
               </Button>
-              <div className="flex items-start justify-between w-64">
+              <div className="flex items-start justify-between w-80">
                 <div className="flex flex-col">
                   <a
                     href="https://cursor.com"
@@ -657,7 +743,7 @@ export default function HomePage() {
             
             {/* Saved Cities */}
             {savedCities.length > 0 && (
-              <div className="w-64">
+              <div className="w-80">
                 <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">
                   <T>Saved Cities</T>
                 </h2>

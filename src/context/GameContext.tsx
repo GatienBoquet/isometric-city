@@ -5,25 +5,18 @@ import React, { createContext, useCallback, useContext, useEffect, useState, use
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import { serializeAndCompressAsync } from '@/lib/saveWorkerManager';
 import { simulateTick } from '@/lib/simulation';
+import { applyToolAtTile } from '@/lib/placement';
 import {
   Budget,
-  BuildingType,
   GameState,
   SavedCityMeta,
   Tool,
-  TOOL_INFO,
-  ZoneType,
 } from '@/types/game';
 import {
-  bulldozeTile,
   createInitialGameState,
   DEFAULT_GRID_SIZE,
   expandGrid,
   shrinkGrid,
-  placeBuilding,
-  placeSubway,
-  placeWaterTerraform,
-  placeLandTerraform,
   checkForDiscoverableCities,
   generateRandomAdvancedCity,
   createBridgesOnPath,
@@ -103,6 +96,7 @@ type GameContextValue = {
   loadSavedCity: (cityId: string) => boolean;
   deleteSavedCity: (cityId: string) => void;
   renameSavedCity: (cityId: string, newName: string) => void;
+  mutateGameState: (recipe: (prev: GameState) => GameState) => void;
 };
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -110,65 +104,6 @@ const GameContext = createContext<GameContextValue | null>(null);
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
-
-const toolBuildingMap: Partial<Record<Tool, BuildingType>> = {
-  road: 'road',
-  rail: 'rail',
-  rail_station: 'rail_station',
-  tree: 'tree',
-  police_station: 'police_station',
-  fire_station: 'fire_station',
-  hospital: 'hospital',
-  school: 'school',
-  university: 'university',
-  park: 'park',
-  park_large: 'park_large',
-  tennis: 'tennis',
-  power_plant: 'power_plant',
-  water_tower: 'water_tower',
-  subway_station: 'subway_station',
-  stadium: 'stadium',
-  museum: 'museum',
-  airport: 'airport',
-  space_program: 'space_program',
-  city_hall: 'city_hall',
-  amusement_park: 'amusement_park',
-  // New parks
-  basketball_courts: 'basketball_courts',
-  playground_small: 'playground_small',
-  playground_large: 'playground_large',
-  baseball_field_small: 'baseball_field_small',
-  soccer_field_small: 'soccer_field_small',
-  football_field: 'football_field',
-  baseball_stadium: 'baseball_stadium',
-  community_center: 'community_center',
-  office_building_small: 'office_building_small',
-  swimming_pool: 'swimming_pool',
-  skate_park: 'skate_park',
-  mini_golf_course: 'mini_golf_course',
-  bleachers_field: 'bleachers_field',
-  go_kart_track: 'go_kart_track',
-  amphitheater: 'amphitheater',
-  greenhouse_garden: 'greenhouse_garden',
-  animal_pens_farm: 'animal_pens_farm',
-  cabin_house: 'cabin_house',
-  campground: 'campground',
-  marina_docks_small: 'marina_docks_small',
-  pier_large: 'pier_large',
-  roller_coaster_small: 'roller_coaster_small',
-  community_garden: 'community_garden',
-  pond_park: 'pond_park',
-  park_gate: 'park_gate',
-  mountain_lodge: 'mountain_lodge',
-  mountain_trailhead: 'mountain_trailhead',
-};
-
-const toolZoneMap: Partial<Record<Tool, ZoneType>> = {
-  zone_residential: 'residential',
-  zone_commercial: 'commercial',
-  zone_industrial: 'industrial',
-  zone_dezone: 'none',
-};
 
 // Load game state from localStorage
 // Supports both compressed (lz-string) and uncompressed (legacy) formats
@@ -647,7 +582,9 @@ function deleteCityState(cityId: string): void {
 
 export function GameProvider({ children, startFresh = false }: { children: React.ReactNode; startFresh?: boolean }) {
   // Start with a default state, we'll load from localStorage after mount (unless startFresh is true)
-  const [state, setState] = useState<GameState>(() => createInitialGameState(DEFAULT_GRID_SIZE, 'IsoCity'));
+  const [state, setState] = useState<GameState>(() =>
+    createInitialGameState(DEFAULT_GRID_SIZE, startFresh ? 'New City' : 'IsoCity'),
+  );
   
   const [hasExistingGame, setHasExistingGame] = useState(false);
   const [isStateReady, setIsStateReady] = useState(false);
@@ -685,18 +622,23 @@ export function GameProvider({ children, startFresh = false }: { children: React
     const cities = loadSavedCitiesIndex();
     setSavedCities(cities);
     
-    // Load game state (unless startFresh is true - used for co-op to start with a new city)
-    if (!startFresh) {
+    if (startFresh) {
+      // Don't write the blank city to the autosave slot here: the caller may
+      // still be holding a city the player has not archived. The regular
+      // autosave takes over once they actually build something.
+      const freshState = createInitialGameState(DEFAULT_GRID_SIZE, 'New City');
+      skipNextSaveRef.current = true;
+      setState(freshState);
+      setHasExistingGame(false);
+    } else {
       const saved = loadGameState();
       if (saved) {
-        skipNextSaveRef.current = true; // Set skip flag BEFORE updating state
+        skipNextSaveRef.current = true;
         setState(saved);
         setHasExistingGame(true);
       } else {
         setHasExistingGame(false);
       }
-    } else {
-      setHasExistingGame(false);
     }
     // Mark as loaded immediately - the skipNextSaveRef will handle skipping the first save
     hasLoadedRef.current = true;
@@ -712,6 +654,11 @@ export function GameProvider({ children, startFresh = false }: { children: React
   // PERF: Just mark that state has changed - defer expensive deep copy to actual save time
   const stateChangedRef = useRef(false);
   const latestStateRef = useRef(state);
+  // The live state the canvas, the simulation tick and mutateGameState all read
+  // from. It has to track `state` within the same commit — deferring the write
+  // to an effect lets a tick that has already advanced the ref be rolled back
+  // to the state this render captured, losing a tick of simulation.
+  // eslint-disable-next-line react-hooks/refs
   latestStateRef.current = state;
   
   useEffect(() => {
@@ -825,7 +772,9 @@ export function GameProvider({ children, startFresh = false }: { children: React
         // React state is only needed for UI elements (stats, budget display)
         if (now - lastUiSyncRef.current >= 500) {
           lastUiSyncRef.current = now;
-          setState(newState);
+          // Always read the live ref at apply time so an in-between agent
+          // mutation is not overwritten by this captured tick snapshot.
+          setState(() => latestStateRef.current);
         }
       }, interval);
     }
@@ -874,99 +823,9 @@ export function GameProvider({ children, startFresh = false }: { children: React
     // For multiplayer broadcast, we need to capture the tool synchronously
     // before React batches the setState. We read from the latest state ref.
     const currentTool = latestStateRef.current.selectedTool;
-    
-    setState((prev) => {
-      const tool = prev.selectedTool;
-      if (tool === 'select') return prev;
 
-      const info = TOOL_INFO[tool];
-      const cost = info?.cost ?? 0;
-      const tile = prev.grid[y]?.[x];
+    setState((prev) => applyToolAtTile(prev, x, y, prev.selectedTool));
 
-      if (!tile) return prev;
-      if (cost > 0 && prev.stats.money < cost) return prev;
-
-      // Prevent wasted spend if nothing would change
-      if (tool === 'bulldoze' && tile.building.type === 'grass' && tile.zone === 'none') {
-        return prev;
-      }
-
-      const building = toolBuildingMap[tool];
-      const zone = toolZoneMap[tool];
-
-      if (zone && tile.zone === zone) return prev;
-      if (building && tile.building.type === building) return prev;
-      
-      // Handle subway tool separately (underground placement)
-      if (tool === 'subway') {
-        // Can't place subway under water
-        if (tile.building.type === 'water') return prev;
-        // Already has subway
-        if (tile.hasSubway) return prev;
-        
-        const nextState = placeSubway(prev, x, y);
-        if (nextState === prev) return prev;
-        
-        return {
-          ...nextState,
-          stats: { ...nextState.stats, money: nextState.stats.money - cost },
-        };
-      }
-      
-      // Handle water terraform tool separately
-      if (tool === 'zone_water') {
-        // Already water - do nothing
-        if (tile.building.type === 'water') return prev;
-        // Don't allow terraforming bridges - would break them
-        if (tile.building.type === 'bridge') return prev;
-        
-        const nextState = placeWaterTerraform(prev, x, y);
-        if (nextState === prev) return prev;
-        
-        return {
-          ...nextState,
-          stats: { ...nextState.stats, money: nextState.stats.money - cost },
-        };
-      }
-      
-      // Handle land terraform tool separately
-      if (tool === 'zone_land') {
-        // Only works on water
-        if (tile.building.type !== 'water') return prev;
-        
-        const nextState = placeLandTerraform(prev, x, y);
-        if (nextState === prev) return prev;
-        
-        return {
-          ...nextState,
-          stats: { ...nextState.stats, money: nextState.stats.money - cost },
-        };
-      }
-
-      let nextState: GameState;
-
-      if (tool === 'bulldoze') {
-        nextState = bulldozeTile(prev, x, y);
-      } else if (zone) {
-        nextState = placeBuilding(prev, x, y, null, zone);
-      } else if (building) {
-        nextState = placeBuilding(prev, x, y, building, null);
-      } else {
-        return prev;
-      }
-
-      if (nextState === prev) return prev;
-
-      if (cost > 0) {
-        nextState = {
-          ...nextState,
-          stats: { ...nextState.stats, money: nextState.stats.money - cost },
-        };
-      }
-
-      return nextState;
-    });
-    
     // Broadcast to multiplayer if this is a local action (not remote)
     // We use the tool captured before setState since React 18 batches async
     if (!isRemote && currentTool !== 'select' && placeCallbackRef.current) {
@@ -1604,7 +1463,14 @@ export function GameProvider({ children, startFresh = false }: { children: React
     });
   }, []);
 
-  // Rename a saved city
+  const mutateGameState = useCallback((recipe: (prev: GameState) => GameState) => {
+    const base = latestStateRef.current;
+    const next = recipe(base);
+    latestStateRef.current = next;
+    stateChangedRef.current = true;
+    setState(() => latestStateRef.current);
+  }, []);
+
   const renameSavedCity = useCallback((cityId: string, newName: string) => {
     // Load the city state, update the name, and save it back
     const cityState = loadCityState(cityId);
@@ -1675,6 +1541,7 @@ export function GameProvider({ children, startFresh = false }: { children: React
     loadSavedCity,
     deleteSavedCity,
     renameSavedCity,
+    mutateGameState,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

@@ -151,6 +151,12 @@ export function useBoatSystem(
     const updatedBoats: Boat[] = [];
     
     for (const boat of boatsRef.current) {
+      // These are the per-frame simulation objects, mutated in place by design.
+      // The ref that owns them lives in CanvasIsometricGrid, which also resets
+      // and draws them, so the compiler sees a hook argument being written.
+      // Cloning every particle each frame is exactly what this hot loop avoids;
+      // clearing the rule means moving ref ownership into these hooks.
+      // eslint-disable-next-line react-hooks/immutability
       boat.age += delta;
       
       // Update wake particles (similar to contrails) - shorter on mobile

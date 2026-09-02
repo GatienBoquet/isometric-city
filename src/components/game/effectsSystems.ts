@@ -227,6 +227,12 @@ export function useEffectsSystems(
     const updatedFireworks: Firework[] = [];
     
     for (const firework of fireworksRef.current) {
+      // These are the per-frame simulation objects, mutated in place by design.
+      // The ref that owns them lives in CanvasIsometricGrid, which also resets
+      // and draws them, so the compiler sees a hook argument being written.
+      // Cloning every particle each frame is exactly what this hot loop avoids;
+      // clearing the rule means moving ref ownership into these hooks.
+      // eslint-disable-next-line react-hooks/immutability
       firework.age += delta;
       
       switch (firework.state) {
@@ -499,6 +505,12 @@ export function useEffectsSystems(
         : SMOG_SPAWN_INTERVAL_MEDIUM;
       const spawnInterval = baseSpawnInterval * spawnMultiplier;
       
+      // These are the per-frame simulation objects, mutated in place by design.
+      // The ref that owns them lives in CanvasIsometricGrid, which also resets
+      // and draws them, so the compiler sees a hook argument being written.
+      // Cloning every particle each frame is exactly what this hot loop avoids;
+      // clearing the rule means moving ref ownership into these hooks.
+      // eslint-disable-next-line react-hooks/immutability
       smog.spawnTimer += adjustedDelta;
       
       // Spawn new particles (only if below particle limit)

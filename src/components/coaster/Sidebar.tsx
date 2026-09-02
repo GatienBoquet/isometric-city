@@ -621,10 +621,11 @@ export function Sidebar({ onExit }: SidebarProps) {
 
   useEffect(() => {
     const isHost = multiplayer?.connectionState === 'connected' && multiplayer?.roomCode && !multiplayer?.initialState;
-    if (isHost && !hasShownShareModalRef.current) {
-      hasShownShareModalRef.current = true;
-      setShowShareModal(true);
-    }
+    if (!isHost || hasShownShareModalRef.current) return;
+    hasShownShareModalRef.current = true;
+    // Queued so becoming host does not cascade a second render.
+    const timer = setTimeout(() => setShowShareModal(true), 0);
+    return () => clearTimeout(timer);
   }, [multiplayer?.connectionState, multiplayer?.roomCode, multiplayer?.initialState]);
   
   return (
