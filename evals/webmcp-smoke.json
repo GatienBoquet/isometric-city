@@ -1,0 +1,112 @@
+[
+  {
+    "name": "Read live city stats",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What's the city's money and population?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "get_city_state",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Second Mayor status",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What is the Second Mayor role right now?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "get_agent_status",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "List placeable tools",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What tools can a plan use?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "get_tool_catalog",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Inspect the city center",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Inspect the tiles around the center of the map."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "inspect_region",
+        "arguments": { "x": 16, "y": 16, "radius": 3 }
+      }
+    ]
+  },
+  {
+    "name": "Highlight a tile then clear",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Point at tile 16,16 then clear the marks."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "highlight_tiles",
+        "arguments": {
+          "tiles": [{ "x": 16, "y": 16, "kind": "focus", "label": "smoke" }]
+        }
+      },
+      {
+        "functionName": "clear_highlights",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Propose a park then discard the ghost",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Ghost a park at 18,18, show me the pending plan, then reject it."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "propose_service",
+        "arguments": { "x": 18, "y": 18, "tool": "park", "reason": "webmcp-evals smoke" }
+      },
+      {
+        "functionName": "get_pending_plan",
+        "arguments": {}
+      },
+      {
+        "functionName": "reject_plan",
+        "arguments": {}
+      }
+    ]
+  }
+]

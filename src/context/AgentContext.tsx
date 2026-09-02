@@ -178,7 +178,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         setPendingPlan(plan);
         showHighlights(marks);
         setLastError(null);
-        if (focusTile) setFocus(focusTile);
+        // Co-builder confirms immediately; yanking the human camera onto
+        // every ghost makes the map jump while they are still playing.
+        if (focusTile && roleRef.current !== 'co-builder') setFocus(focusTile);
       });
     },
     [pushLog, showHighlights],
@@ -496,7 +498,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             })),
           ];
           showHighlights(marks);
-          if (marks[0]) setFocus({ x: marks[0].x, y: marks[0].y });
+          if (marks[0] && roleRef.current !== 'co-builder') {
+            setFocus({ x: marks[0].x, y: marks[0].y });
+          }
           return { ok: true, ...problems, highlighted: marks.length };
         }
         case 'get_pending_plan':
@@ -532,7 +536,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             })
             .filter((h) => state.grid[h.y]?.[h.x]);
           showHighlights(next);
-          if (next[0]) setFocus({ x: next[0].x, y: next[0].y });
+          if (next[0] && roleRef.current !== 'co-builder') {
+            setFocus({ x: next[0].x, y: next[0].y });
+          }
           return { ok: true, count: next.length };
         }
         case 'clear_highlights':

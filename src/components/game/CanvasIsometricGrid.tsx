@@ -152,6 +152,12 @@ export function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile
   const zoomRef = useRef(isMobile ? 0.6 : 1); // Ref for animation loop to check zoom level
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const panCandidateRef = useRef<{ startX: number; startY: number; gridX: number; gridY: number } | null>(null);
+  const onNavigationCompleteRef = useRef(onNavigationComplete);
+  // Keep the latest callback without putting it in the navigation effect deps —
+  // a new function every GameScreen render used to re-snap the camera.
+  // eslint-disable-next-line react-hooks/refs
+  onNavigationCompleteRef.current = onNavigationComplete;
+  const lastNavigationKeyRef = useRef<string | null>(null);
   const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
   const [hoveredIncident, setHoveredIncident] = useState<{
     x: number;
@@ -2628,32 +2634,31 @@ export function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile
     };
   }, [getMapBounds, canvasSize.width, canvasSize.height]);
 
-  // Handle minimap navigation - center the view on the target tile
+  // Handle minimap / agent focus navigation — pan once per tile, never on
+  // parent re-renders. Offset is in CSS pixels (same as mouse pan); canvasSize
+  // is the device-pixel buffer, so centering must use the container's CSS size.
   useEffect(() => {
-    if (!navigationTarget) return;
-    
-    // Convert grid coordinates to screen coordinates
+    if (!navigationTarget) {
+      lastNavigationKeyRef.current = null;
+      return;
+    }
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width < 2 || rect.height < 2) return;
+
+    const key = `${navigationTarget.x},${navigationTarget.y}`;
+    if (lastNavigationKeyRef.current === key) return;
+    lastNavigationKeyRef.current = key;
+
     const { screenX, screenY } = gridToScreen(navigationTarget.x, navigationTarget.y, 0, 0);
-    
-    // Calculate offset to center this position on the canvas
-    const centerX = canvasSize.width / 2;
-    const centerY = canvasSize.height / 2;
-    
     const newOffset = {
-      x: centerX - screenX * zoom,
-      y: centerY - screenY * zoom,
+      x: rect.width / 2 - screenX * zoom,
+      y: rect.height / 2 - screenY * zoom,
     };
-    
-    // Clamp and set the new offset - this is a legitimate use case for responding to navigation requests
-    const bounds = getMapBounds(zoom, canvasSize.width, canvasSize.height);
-    setOffset({ // eslint-disable-line
-      x: Math.max(bounds.minOffsetX, Math.min(bounds.maxOffsetX, newOffset.x)),
-      y: Math.max(bounds.minOffsetY, Math.min(bounds.maxOffsetY, newOffset.y)),
-    });
-    
-    // Signal that navigation is complete
-    onNavigationComplete?.();
-  }, [navigationTarget, zoom, canvasSize.width, canvasSize.height, getMapBounds, onNavigationComplete]);
+
+    setOffset(clampOffset(newOffset, zoom));
+    onNavigationCompleteRef.current?.();
+  }, [navigationTarget, zoom, canvasSize.width, canvasSize.height, clampOffset]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isPanning && panCandidateRef.current) {

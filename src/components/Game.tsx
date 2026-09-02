@@ -199,13 +199,13 @@ function GameScreen({ onExit }: { onExit?: () => void }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [state.activePanel, state.selectedTool, state.speed, selectedTile, setActivePanel, setTool, setSpeed, overlayMode]);
 
-  // The agent's focus tile drives the camera directly rather than through an
-  // effect that mirrors it into navigationTarget.
+  // One-shot pan: the canvas recenters once, then this clears the target so a
+  // later GameScreen render (sim tick, HUD) cannot snap the camera again.
   const cameraTarget = agent.focus ?? navigationTarget;
-  const onCameraArrived = () => {
+  const onCameraArrived = useCallback(() => {
     setNavigationTarget(null);
     agent.clearFocus();
-  };
+  }, [agent.clearFocus]);
 
   // Handle cheat code triggers
   useEffect(() => {
